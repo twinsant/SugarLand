@@ -1,40 +1,40 @@
-# SugarLand 元宇宙25号
+# SugarLand Metaverse No. 25
 AI powered Sugarscape
 
-## 什么是糖域
+## What is Sugarscape?
 
-糖域是马尔兰大学的经济学家Thomas Schelling在1969年设计的一个模拟游戏，但它更重要的目的是进行一个复杂经济学实验，来研究人类社会私有制、消费、财富积累、贸易、金融还有遗传与继承导致的经济变化，它深刻地揭露了新自由主义不敢正视的一个问题：
+Sugarscape is a simulation game designed by Thomas Schelling, an economist at the University of Maryland, in 1969. However, its more significant purpose is to conduct a complex economic experiment to study private property, consumption, and other aspects of human society.
 
-> 横向不平等
+> Horizontal Inequality
 
-了解糖域实验可以让我们更加深刻地思考资本主义、私有制、自由市场、贸易、金融和你所关心的所有问题，说白了，你可以通过糖域实验观察一个简化的人类社会模型，通过这个复杂经济学实验，你可以知道：
+Understanding the Sugarscape experiment allows us to think more deeply about capitalism, private property, the free market, trade, finance, and all the issues you care about. To put it simply, through the Sugarscape experiment, you can observe a [...]
 
-* 你为什么穷？
-* 她/他为什么富？为什么我穷其一生，才能过上富二代生来就有的生活
-* 你买不起 79 元的眉笔真的是因为工作不努力吗？
-* 自由市场能解决什么问题，不能解决什么问题？国家如何在公共产品领域发挥价值
-* 我们为什么要学习马克思主义，在人工智能即将统治人类社会的前夜，想明白为什么要坚持市场经济的同时坚持生产资料公有制、坚持社会主义，并为共产主义而奋斗
+* Why are you poor?
+* Why are they rich? Why do I have to spend my whole life to achieve the standard of living that a "rich second generation" is born with?
+* Is it really because you don't work hard enough that you can't afford a 79-yuan eyebrow pencil?
+* What problems can the free market solve, and what can't it? How can the state provide value in the field of public goods?
+* Why should we study Marxism? On the eve of AI potentially dominating human society, why is it important to understand the need for a market economy while adhering to public ownership of the means of production and socialism? [...] 
 
-糖域实验是国外学者脱离了形而上学的传统经济学，创造的一个极佳的社会实验游戏，也可以给所有投身于 Web3 期望用区块链技术改造生产关系的探索者一些实际参考，它可以模拟很多社会实验，包括 私有货币、DAO，这也是这个项目的一个愿景
+The Sugarscape experiment is an excellent social experiment game created by international scholars moving away from metaphysical traditional economics. It also provides a great simulation environment for everyone involved in Web3 who hopes to use blockchain technology to transform production relations.
 
-## 糖域实验的游戏设计
+## Game Design of the Sugarscape Experiment
 
-参考[《财富的起源》](https://book.douban.com/subject/34834004/)，这里不冗述了
+Please refer to ["The Origin of Wealth"](https://book.douban.com/subject/34834004/). I won't go into detail here.
 
-## AI 糖域实验
+## AI Sugarscape Experiment
 
-根据糖域实验的设计，我们发现其中的智能体非常适合用 AI Agent 来模拟，这就是这个项目的初心，这个项目的实际意义蚂蚁觉得远超越 斯坦福小镇 这样的模拟游戏，能让更多人对经济学对我们所处的社会加以更深刻的思考
+Based on the design of the Sugarscape experiment, we found that the agents are very suitable for simulation using AI Agents. This is the original intention of this project. "Ant" (the author) believes the practical significance of this project far exceeds the "Stanford Small Town" [...]
 
-也欢迎所有对经济学感兴趣的人一同参与，能学习和思考到更多的东西
+We welcome everyone interested in economics to participate, to learn and think about more things together.
 
-本项目分国内外两个仓库，方便大家使用：
+This project is divided into two repositories (domestic and international) for convenience:
 
-* GitHub主仓库：https://github.com/twinsant/sugarland/
-* (废弃(●`ε´●) Gitee 镜像
+* Main GitHub Repo: https://github.com/twinsant/sugarland/
+* (Deprecated (●`ε´●) Gitee Mirror
 
 # Refs
 
-* [NotebookLM资料](https://notebooklm.google.com/notebook/95e9cbad-8a41-4be3-945b-06ef154a615e)
-  * [Sugarscape](https://en.wikipedia.org/wiki/Sugarscape)
-  * [The Sugarscape](https://sugarscape.sourceforge.net/)
-  * [Sugarscape](https://juliadynamics.github.io/AgentsExampleZoo.jl/dev/examples/sugarscape/)
+* [NotebookLM Resources](https://notebooklm.google.com/notebook/95e9cbad-8a41-4be3-945b-06ef154a615e)
+  * [Sugarscape (Wikipedia)](https://en.wikipedia.org/wiki/Sugarscape)
+  * [The Sugarscape (SourceForge)](https://sugarscape.sourceforge.net/)
+  * [Sugarscape (AgentsExampleZoo.jl)](https://juliadynamics.github.io/AgentsExampleZoo.jl/dev/examples/sugarscape/)
