@@ -29,8 +29,8 @@ AI powered Sugarscape
 
 本项目分国内外两个仓库，方便大家使用：
 
-* GitHub主仓库：https://github.com/twinsant/SapiensPlayground/
-* (废弃(●`ε´●) Gitee 镜像： https://gitee.com/twinsant/SapiensPlayground
+* GitHub主仓库：https://github.com/twinsant/sugarland/
+* (废弃(●`ε´●) Gitee 镜像： https://gitee.com/twinsant/sugarland
 
 # Refs
 
