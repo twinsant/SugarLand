@@ -30,10 +30,11 @@ AI powered Sugarscape
 本项目分国内外两个仓库，方便大家使用：
 
 * GitHub主仓库：https://github.com/twinsant/sugarland/
-* (废弃(●`ε´●) Gitee 镜像： https://gitee.com/twinsant/sugarland
+* (废弃(●`ε´●) Gitee 镜像
 
 # Refs
 
-* [Sugarscape](https://en.wikipedia.org/wiki/Sugarscape)
-* [The Sugarscape](https://sugarscape.sourceforge.net/)
-* [Sugarscape](https://juliadynamics.github.io/AgentsExampleZoo.jl/dev/examples/sugarscape/)
+* [NotebookLM资料](https://notebooklm.google.com/notebook/95e9cbad-8a41-4be3-945b-06ef154a615e)
+  * [Sugarscape](https://en.wikipedia.org/wiki/Sugarscape)
+  * [The Sugarscape](https://sugarscape.sourceforge.net/)
+  * [Sugarscape](https://juliadynamics.github.io/AgentsExampleZoo.jl/dev/examples/sugarscape/)
