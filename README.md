@@ -1,6 +1,34 @@
 # SugarLand Metaverse No. 25
 AI powered Sugarscape
 
+## Project Summary
+
+SugarLand is an AI-powered reimplementation of the classic [Sugarscape](https://en.wikipedia.org/wiki/Sugarscape) agent-based model (ABM), originally conceived by Epstein & Axtell in *Growing Artificial Societies* (1996). The project replaces traditional hard-coded agents with **AI Agents**, enabling richer emergent social behavior in a simulated economy.
+
+### Key Features
+
+| Feature | Description |
+|---|---|
+| **AI Agent Simulation** | Agents are driven by AI instead of simple rule scripts, allowing more realistic decision-making |
+| **Dual-Resource Economy** | Sugar and Spice resources with seasonal cycles, pollution, and regeneration mechanics |
+| **Social Behaviors** | Barter trading (Bull/Bear strategies), reproduction with genetic inheritance, and wealth transfer |
+| **50×50 Torus Grid** | Wrap-around topology eliminates edge bias; dual-peak resource topography drives migration |
+| **Population Dynamics** | Birth, aging, death, natural selection pressure, and emergent wealth inequality (Gini coefficient) |
+| **Real-time Monitoring** | Scoreboard with population stats, attribute distributions, wealth Gini, and performance metrics |
+
+### Technical Architecture
+
+- **Cellspace**: 50×50 grid with Torus topology, dual-peak resource landscape, seasonal growth rates, and pollution accumulation.
+- **Citizens**: Heterogeneous agents with genetically determined vision (*v* ∈ [1,6]), metabolism (*m* ∈ [1,4]), max age ∈ [60,100], and initial wealth ∈ [5,25].
+- **Ruleset Engine**: Strict G→M→R execution order (Grow → Move → Replace) with randomized agent scheduling to eliminate first-mover bias.
+- **Advanced Economics**: Marginal-value-based barter with Bull (high-frequency) and Bear (safety-margin) trading strategies.
+
+### Project Goal
+
+The practical significance of this project is to provide an accessible platform for exploring questions about wealth inequality, market dynamics, and social structure through AI-driven simulation — questions such as *why are the rich rich and the poor poor?*, *what can free markets solve and what can't they?*, and *how do inheritance and initial endowments shape social stratification?*
+
+> For the full technical specification, see [SPEC.md](SPEC.md).
+
 ## What is Sugarscape?
 
 Sugarscape is a simulation game designed by Thomas Schelling, an economist at the University of Maryland, in 1969. However, its more significant purpose is to conduct a complex economic experiment to study private property, consumption, and other aspects of human society.
