@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌍 SugarLand 元宇宙25号</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; color: #e0e0e0; font-family: 'SF Mono', 'Fira Code', monospace; overflow: hidden; }
+
+.app { display: flex; height: 100vh; }
+
+/* Left panel - Map */
+.map-panel { flex: 1; display: flex; flex-direction: column; padding: 12px; }
+.map-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.map-header h1 { font-size: 18px; color: #ffd700; }
+.map-header .timestep { font-size: 14px; color: #888; }
+canvas { border: 1px solid #333; border-radius: 4px; cursor: crosshair; flex: 1; image-rendering: pixelated; }
+
+/* Right panel */
+.info-panel { width: 320px; background: #111122; border-left: 1px solid #222; padding: 16px; overflow-y: auto; }
+.section { margin-bottom: 20px; }
+.section h2 { font-size: 13px; color: #ffd700; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
+
+/* Stats grid */
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat { background: #1a1a2e; border-radius: 6px; padding: 10px; }
+.stat .label { font-size: 10px; color: #888; text-transform: uppercase; }
+.stat .value { font-size: 20px; font-weight: bold; color: #fff; }
+.stat .value.gold { color: #ffd700; }
+.stat .value.green { color: #4ade80; }
+.stat .value.red { color: #f87171; }
+.stat .value.blue { color: #60a5fa; }
+
+/* Controls */
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.btn { background: #2a2a4a; border: 1px solid #444; color: #e0e0e0; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: inherit; transition: all 0.2s; }
+.btn:hover { background: #3a3a5a; border-color: #666; }
+.btn.active { background: #4a3a1a; border-color: #ffd700; color: #ffd700; }
+.btn.primary { background: #3a2a0a; border-color: #ffd700; color: #ffd700; }
+
+/* Speed slider */
+.speed-control { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.speed-control label { font-size: 11px; color: #888; }
+.speed-control input { flex: 1; accent-color: #ffd700; }
+
+/* Citizen list */
+.citizen-list { max-height: 200px; overflow-y: auto; font-size: 11px; }
+.citizen-row { display: grid; grid-template-columns: 30px 40px 40px 50px 50px; padding: 4px 0; border-bottom: 1px solid #1a1a2e; }
+.citizen-row.header { color: #888; font-weight: bold; position: sticky; top: 0; background: #111122; }
+
+/* Legend */
+.legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; }
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-color { width: 12px; height: 12px; border-radius: 2px; }
+
+/* Tooltip */
+.tooltip { position: absolute; background: #1a1a2e; border: 1px solid #444; border-radius: 6px; padding: 10px; font-size: 11px; pointer-events: none; z-index: 100; display: none; min-width: 180px; }
+.tooltip .tt-title { color: #ffd700; font-weight: bold; margin-bottom: 6px; }
+.tooltip .tt-row { display: flex; justify-content: space-between; margin: 2px 0; }
+.tooltip .tt-label { color: #888; }
+
+/* Distribution chart */
+.chart-container { height: 80px; background: #1a1a2e; border-radius: 4px; position: relative; margin-top: 8px; }
+canvas.chart { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="map-panel">
+    <div class="map-header">
+      <h1>🌍 SugarLand 元宇宙25号</h1>
+      <span class="timestep" id="timestep">T = 0</span>
+    </div>
+    <div class="controls">
+      <button class="btn primary" id="btnPlay" onclick="togglePlay()">▶ 开始</button>
+      <button class="btn" onclick="step()">⏭ 单步</button>
+      <button class="btn" onclick="reset()">🔄 重置</button>
+      <button class="btn" id="btnHeat" onclick="toggleHeat()">🌡 糖热力图</button>
+    </div>
+    <div class="speed-control">
+      <label>速度</label>
+      <input type="range" id="speedSlider" min="100" max="3000" value="500" oninput="updateSpeed(this.value)">
+      <span id="speedLabel">500ms</span>
+    </div>
+    <canvas id="mapCanvas"></canvas>
+  </div>
+
+  <div class="info-panel">
+    <div class="section">
+      <h2>📊 实时统计</h2>
+      <div class="stats">
+        <div class="stat"><div class="label">人口</div><div class="value gold" id="statPop">-</div></div>
+        <div class="stat"><div class="label">总糖量</div><div class="value green" id="statSugar">-</div></div>
+        <div class="stat"><div class="label">基尼系数</div><div class="value red" id="statGini">-</div></div>
+        <div class="stat"><div class="label">平均年龄</div><div class="value blue" id="statAge">-</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>📈 财富分布</h2>
+      <canvas class="chart" id="wealthChart" height="80"></canvas>
+    </div>
+
+    <div class="section">
+      <h2>🗺 图例</h2>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-color" style="background:#2d1b00"></div>沙漠</div>
+        <div class="legend-item"><div class="legend-color" style="background:#4a7a20"></div>低糖</div>
+        <div class="legend-item"><div class="legend-color" style="background:#8bc34a"></div>中糖</div>
+        <div class="legend-item"><div class="legend-color" style="background:#ffd700"></div>高峰</div>
+        <div class="legend-item"><div class="legend-color" style="background:#ff5722;border-radius:50%"></div>公民</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>👥 公民 TOP 10（财富）</h2>
+      <div class="citizen-list" id="citizenList">
+        <div class="citizen-row header">
+          <span>ID</span><span>X</span><span>Y</span><span>年龄</span><span>💰财富</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>⚙ 配置</h2>
+      <div id="configInfo" style="font-size:11px; color:#888; line-height:1.8;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const API = '';
+const canvas = document.getElementById('mapCanvas');
+const ctx = canvas.getContext('2d');
+const wealthCanvas = document.getElementById('wealthChart');
+const wealthCtx = wealthCanvas.getContext('2d');
+
+let config = { width: 50, height: 50, peak_x1: 15, peak_y1: 15, peak_x2: 35, peak_y2: 35, peak_capacity: 4, growth_rate: 1, init_population: 400 };
+let citizens = [];
+let worldState = {};
+let playing = false;
+let timer = null;
+let speed = 500;
+let showHeat = true;
+let cellCache = {};
+let cellQueue = [];
+
+// --- API calls ---
+async function fetchWorld() {
+  const res = await fetch(`${API}/api/world`);
+  const data = await res.json();
+  config = data.config;
+  worldState = data;
+  document.getElementById('timestep').textContent = `T = ${data.timestep}`;
+  document.getElementById('statPop').textContent = data.population;
+  document.getElementById('statSugar').textContent = data.total_sugar.toFixed(0);
+  document.getElementById('configInfo').innerHTML = `
+    网格: ${config.width}×${config.height}<br>
+    双峰: (${config.peak_x1},${config.peak_y1}) & (${config.peak_x2},${config.peak_y2})<br>
+    峰值容量: ${config.peak_capacity}<br>
+    初始人口: ${config.init_population}
+  `;
+}
+
+async function fetchCitizens() {
+  const res = await fetch(`${API}/api/citizens`);
+  citizens = await res.json();
+
+  // Normalize coordinates to 0-49 range (torus wrap)
+  citizens = citizens.filter(c => c.alive).map(c => ({
+    ...c,
+    x: ((c.x % config.width) + config.width) % config.width,
+    y: ((c.y % config.height) + config.height) % config.height
+  }));
+
+  // Update stats
+  if (citizens.length > 0) {
+    const avgAge = citizens.reduce((s, c) => s + c.age, 0) / citizens.length;
+    document.getElementById('statAge').textContent = avgAge.toFixed(1);
+
+    // Gini coefficient
+    const wealths = citizens.map(c => c.wealth).sort((a, b) => a - b);
+    const n = wealths.length;
+    let gini = 0;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        gini += Math.abs(wealths[i] - wealths[j]);
+      }
+    }
+    gini = gini / (2 * n * n * (wealths.reduce((s, w) => s + w, 0) / n));
+    document.getElementById('statGini').textContent = isNaN(gini) ? '-' : gini.toFixed(3);
+
+    // Wealth distribution chart
+    drawWealthChart(wealths);
+
+    // Citizen list (top 10)
+    const sorted = [...citizens].sort((a, b) => b.wealth - a.wealth).slice(0, 10);
+    const listHtml = sorted.map(c => `
+      <div class="citizen-row">
+        <span>${c.id}</span><span>${c.x}</span><span>${c.y}</span><span>${c.age}</span><span style="color:#ffd700">${c.wealth}</span>
+      </div>
+    `).join('');
+    document.getElementById('citizenList').innerHTML = `
+      <div class="citizen-row header"><span>ID</span><span>X</span><span>Y</span><span>年龄</span><span>💰财富</span></div>
+      ${listHtml}
+    `;
+  }
+}
+
+async function fetchCell(x, y) {
+  const key = `${x},${y}`;
+  if (cellCache[key]) return cellCache[key];
+  try {
+    const res = await fetch(`${API}/api/cells/${x}/${y}`);
+    const data = await res.json();
+    cellCache[key] = data;
+    return data;
+  } catch { return null; }
+}
+
+// Batch fetch cells for a region
+async function fetchCellsBatch() {
+  // Sample a grid of cells (every 2nd cell to reduce requests)
+  const promises = [];
+  for (let y = 0; y < config.height; y += 2) {
+    for (let x = 0; x < config.width; x += 2) {
+      promises.push(fetchCell(x, y));
+    }
+  }
+  await Promise.all(promises);
+}
+
+// --- Simulation control ---
+async function step() {
+  await fetch(`${API}/api/world/step`, { method: 'POST' });
+  await Promise.all([fetchWorld(), fetchCitizens()]);
+  // Refresh cell cache periodically
+  if (worldState.timestep % 10 === 0) cellCache = {};
+  await fetchCellsBatch();
+  render();
+}
+
+async function reset() {
+  await fetch(`${API}/api/world/reset`, { method: 'POST' });
+  cellCache = {};
+  await Promise.all([fetchWorld(), fetchCitizens()]);
+  await fetchCellsBatch();
+  render();
+}
+
+function togglePlay() {
+  playing = !playing;
+  document.getElementById('btnPlay').textContent = playing ? '⏸ 暂停' : '▶ 开始';
+  document.getElementById('btnPlay').classList.toggle('active', playing);
+  if (playing) {
+    timer = setInterval(step, speed);
+  } else {
+    clearInterval(timer);
+  }
+}
+
+function toggleHeat() {
+  showHeat = !showHeat;
+  document.getElementById('btnHeat').classList.toggle('active', showHeat);
+  render();
+}
+
+function updateSpeed(val) {
+  speed = parseInt(val);
+  document.getElementById('speedLabel').textContent = `${val}ms`;
+  if (playing) {
+    clearInterval(timer);
+    timer = setInterval(step, speed);
+  }
+}
+
+// --- Rendering ---
+function sugarToColor(sugar, capacity) {
+  const ratio = capacity > 0 ? sugar / capacity : 0;
+  if (ratio < 0.1) return '#1a1200';
+  if (ratio < 0.3) return '#2d2000';
+  if (ratio < 0.5) return '#4a7a20';
+  if (ratio < 0.7) return '#6ba332';
+  if (ratio < 0.9) return '#8bc34a';
+  return '#ffd700';
+}
+
+function render() {
+  const W = canvas.width;
+  const H = canvas.height;
+  const cellW = W / config.width;
+  const cellH = H / config.height;
+
+  ctx.fillStyle = '#0a0a1a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw cells (sugar terrain)
+  if (showHeat) {
+    for (let y = 0; y < config.height; y++) {
+      for (let x = 0; x < config.width; x++) {
+        const cell = cellCache[`${x},${y}`];
+        if (cell) {
+          ctx.fillStyle = sugarToColor(cell.sugar, cell.capacity);
+        } else {
+          // Estimate based on distance to peaks
+          const d1 = Math.sqrt((x - config.peak_x1) ** 2 + (y - config.peak_y1) ** 2);
+          const d2 = Math.sqrt((x - config.peak_x2) ** 2 + (y - config.peak_y2) ** 2);
+          const d = Math.min(d1, d2);
+          const ratio = Math.max(0, 1 - d / 20);
+          const r = Math.floor(26 + ratio * 100);
+          const g = Math.floor(18 + ratio * 120);
+          const b = 0;
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+        }
+        ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+      }
+    }
+  }
+
+  // Draw peak markers
+  ctx.strokeStyle = '#ff660044';
+  ctx.lineWidth = 1;
+  [config.peak_x1, config.peak_x2].forEach((px, i) => {
+    const py = i === 0 ? config.peak_y1 : config.peak_y2;
+    ctx.beginPath();
+    ctx.arc(px * cellW + cellW / 2, py * cellH + cellH / 2, 15, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  // Draw citizens
+  citizens.forEach(c => {
+    const cx = c.x * cellW + cellW / 2;
+    const cy = c.y * cellH + cellH / 2;
+    const size = Math.max(2, Math.min(6, c.wealth / 15));
+
+    // Glow effect
+    ctx.beginPath();
+    ctx.arc(cx, cy, size + 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 87, 34, 0.2)';
+    ctx.fill();
+
+    // Citizen dot
+    ctx.beginPath();
+    ctx.arc(cx, cy, size, 0, Math.PI * 2);
+    const hue = Math.max(0, Math.min(60, c.wealth / 2)); // yellow to red based on wealth
+    ctx.fillStyle = `hsl(${hue}, 90%, 55%)`;
+    ctx.fill();
+  });
+
+  // Draw grid lines (subtle)
+  if (cellW > 4) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x <= config.width; x += 5) {
+      ctx.beginPath();
+      ctx.moveTo(x * cellW, 0);
+      ctx.lineTo(x * cellW, H);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= config.height; y += 5) {
+      ctx.beginPath();
+      ctx.moveTo(0, y * cellH);
+      ctx.lineTo(W, y * cellH);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawWealthChart(wealths) {
+  const W = wealthCanvas.width;
+  const H = wealthCanvas.height;
+  wealthCtx.clearRect(0, 0, W, H);
+
+  // Build histogram
+  const maxWealth = Math.max(...wealths, 50);
+  const bins = 20;
+  const binWidth = maxWealth / bins;
+  const histogram = new Array(bins).fill(0);
+  wealths.forEach(w => {
+    const idx = Math.min(Math.floor(w / binWidth), bins - 1);
+    histogram[idx]++;
+  });
+  const maxCount = Math.max(...histogram, 1);
+
+  // Draw bars
+  const barW = W / bins - 1;
+  histogram.forEach((count, i) => {
+    const barH = (count / maxCount) * (H - 10);
+    const x = i * (barW + 1);
+    const y = H - barH;
+    wealthCtx.fillStyle = `hsl(${40 - i * 1.5}, 80%, 50%)`;
+    wealthCtx.fillRect(x, y, barW, barH);
+  });
+}
+
+// --- Tooltip ---
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left) / (rect.width / config.width));
+  const y = Math.floor((e.clientY - rect.top) / (rect.height / config.height));
+
+  const cell = cellCache[`${x},${y}`];
+  const citizensHere = citizens.filter(c => c.x === x && c.y === y);
+
+  const tooltip = document.getElementById('tooltip');
+  if (cell || citizensHere.length > 0) {
+    let html = `<div class="tt-title">格子 (${x}, ${y})</div>`;
+    if (cell) {
+      html += `<div class="tt-row"><span class="tt-label">糖</span><span>${cell.sugar.toFixed(1)}</span></div>`;
+      html += `<div class="tt-row"><span class="tt-label">容量</span><span>${cell.capacity.toFixed(1)}</span></div>`;
+      html += `<div class="tt-row"><span class="tt-label">污染</span><span>${cell.pollution.toFixed(1)}</span></div>`;
+    }
+    if (citizensHere.length > 0) {
+      html += `<div style="margin-top:6px;color:#ff5722;font-weight:bold;">👤 ${citizensHere.length} 个公民</div>`;
+      citizensHere.slice(0, 3).forEach(c => {
+        html += `<div class="tt-row"><span class="tt-label">ID ${c.id}</span><span>💰${c.wealth} 年龄${c.age}</span></div>`;
+      });
+    }
+    tooltip.innerHTML = html;
+    tooltip.style.display = 'block';
+    tooltip.style.left = (e.clientX + 12) + 'px';
+    tooltip.style.top = (e.clientY + 12) + 'px';
+  } else {
+    tooltip.style.display = 'none';
+  }
+});
+
+canvas.addEventListener('mouseleave', () => {
+  document.getElementById('tooltip').style.display = 'none';
+});
+
+// --- Resize ---
+function resize() {
+  const panel = canvas.parentElement;
+  const headerH = panel.querySelector('.map-header').offsetHeight;
+  const controlsH = panel.querySelector('.controls').offsetHeight;
+  const speedH = panel.querySelector('.speed-control').offsetHeight;
+  const availH = panel.offsetHeight - headerH - controlsH - speedH - 30;
+  const availW = panel.offsetWidth - 24;
+  const size = Math.min(availW, availH);
+  canvas.width = size;
+  canvas.height = size;
+  render();
+}
+
+// --- Init ---
+window.addEventListener('resize', resize);
+(async () => {
+  resize();
+  await Promise.all([fetchWorld(), fetchCitizens()]);
+  await fetchCellsBatch();
+  render();
+})();
+</script>
+</body>
+</html>

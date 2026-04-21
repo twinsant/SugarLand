@@ -51,40 +51,15 @@ func main() {
 	handler := api.NewHandler(world)
 	handler.RegisterRoutes(mux)
 
+	// 静态文件服务（可视化页面）
+	fs := http.FileServer(http.Dir("static"))
+	mux.Handle("/static/", http.StripPrefix("/static/", fs))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head><title>SugarLand Phase 3</title></head>
-<body>
-<h1>🌍 SugarLand - Sugarscape 仿真 (Phase 3)</h1>
-<h2>API 端点</h2>
-<ul>
-<li><a href="/api/world">GET /api/world</a> - 世界状态</li>
-<li>POST /api/world/step - 推进一步</li>
-<li>POST /api/world/reset - 重置世界</li>
-<li><a href="/api/citizens">GET /api/citizens</a> - 公民列表</li>
-<li><a href="/api/cellspace">GET /api/cellspace</a> - 地图快照</li>
-<li>GET /api/cells/:x/:y - 单个格子状态</li>
-<li><a href="/api/scoreboard">GET /api/scoreboard</a> - 记分板统计</li>
-</ul>
-<h2>Agent API（LPC 脚本模式）</h2>
-<ul>
-<li>POST /api/agent/attach - 绑定 LPC 脚本到 citizen</li>
-<li>POST /api/agent/detach - 解绑 LPC 脚本</li>
-<li>GET /api/agent/context?id=:id - 获取 agent 上下文</li>
-</ul>
-<h2>AI 接管模式</h2>
-<ul>
-<li>POST /api/ai/attach - 绑定 AI agent 到 citizen</li>
-<li>POST /api/ai/detach - 解绑 AI agent</li>
-<li>POST /api/citizens/command - 给被接管的 citizen 下达指令</li>
-</ul>
-</body></html>`)
+		http.ServeFile(w, r, "static/index.html")
 	})
 
 	addr := fmt.Sprintf(":%d", *port)
