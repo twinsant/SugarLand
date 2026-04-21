@@ -217,7 +217,13 @@ func (p *Parser) parseIf() *IfStmt {
 	var elseBlock *BlockStmt
 	if p.cur.Type == TokenElse {
 		p.advance()
-		elseBlock = p.parseBlock()
+		// 支持 else if 链
+		if p.cur.Type == TokenIf {
+			elseStmt := p.parseIf()
+			elseBlock = &BlockStmt{Statements: []Node{elseStmt}}
+		} else {
+			elseBlock = p.parseBlock()
+		}
 	}
 
 	return &IfStmt{

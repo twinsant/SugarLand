@@ -1,47 +1,26 @@
-// LPC 示例脚本：觅食行为
-// 在视觉范围内找糖最多的格子并移动
+// LPC 示例脚本：贸易行为（Bull 策略）
+// 小量高频交易：当糖过剩时寻找邻居交易
 
 void heart_beat() {
     int x = query_x();
     int y = query_y();
+    int wealth = query_wealth();
+
+    // 先觅食
     int best_x = x;
     int best_y = y;
     int best_sugar = 0;
     int s;
 
-    // 检查北
     s = query_cell_sugar(x, y - 1);
-    if (s > best_sugar) {
-        best_sugar = s;
-        best_x = x;
-        best_y = y - 1;
-    }
-
-    // 检查南
+    if (s > best_sugar) { best_sugar = s; best_x = x; best_y = y - 1; }
     s = query_cell_sugar(x, y + 1);
-    if (s > best_sugar) {
-        best_sugar = s;
-        best_x = x;
-        best_y = y + 1;
-    }
-
-    // 检查西
+    if (s > best_sugar) { best_sugar = s; best_x = x; best_y = y + 1; }
     s = query_cell_sugar(x - 1, y);
-    if (s > best_sugar) {
-        best_sugar = s;
-        best_x = x - 1;
-        best_y = y;
-    }
-
-    // 检查东
+    if (s > best_sugar) { best_sugar = s; best_x = x - 1; best_y = y; }
     s = query_cell_sugar(x + 1, y);
-    if (s > best_sugar) {
-        best_sugar = s;
-        best_x = x + 1;
-        best_y = y;
-    }
+    if (s > best_sugar) { best_sugar = s; best_x = x + 1; best_y = y; }
 
-    // 如果四方向都没有更多糖，随机移动
     if (best_sugar == 0) {
         int dir = random(4);
         if (dir == 0) {
@@ -58,4 +37,11 @@ void heart_beat() {
     }
 
     harvest();
+
+    // Bull 策略：财富超过阈值时尝试小额交易
+    if (wealth > 20) {
+        set_trade_willingness(1);
+    } else {
+        set_trade_willingness(0);
+    }
 }

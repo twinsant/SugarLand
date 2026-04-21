@@ -64,14 +64,20 @@ func (e *Environment) SetGlobal(name string, val Value) {
 
 // Value 表示 LPC 运行时值
 type Value struct {
-	Kind    string // "int", "string", "null"
+	Kind    string // "int", "string", "array", "null"
 	IntVal  int
 	StrVal  string
+	ArrVal  []Value
 }
 
 // IntValue 创建整数值
 func IntValue(v int) Value {
 	return Value{Kind: "int", IntVal: v}
+}
+
+// ArrayValue 创建数组值
+func ArrayValue(v []Value) Value {
+	return Value{Kind: "array", ArrVal: v}
 }
 
 // StringValue 创建字符串值
@@ -103,6 +109,8 @@ func (v Value) String() string {
 		return fmt.Sprintf("%d", v.IntVal)
 	case "string":
 		return v.StrVal
+	case "array":
+		return fmt.Sprintf("array(%d)", len(v.ArrVal))
 	default:
 		return "null"
 	}
@@ -119,8 +127,9 @@ func (r *ReturnValue) Error() string {
 
 // VM 是 LPC 虚拟机，负责执行 AST
 type VM struct {
-	Env  *Environment
-	Out  []string // write() 输出缓冲
+	Env        *Environment
+	Out        []string         // write() 输出缓冲
+	ObjManager *ObjectManager   // 对象管理器引用（efun 使用）
 }
 
 // NewVM 创建新的虚拟机

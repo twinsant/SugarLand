@@ -1,3 +1,4 @@
+// Package sim 实现 Sugarscape 中的公民智能体
 package sim
 
 import (
@@ -9,16 +10,22 @@ import (
 
 // Citizen 表示 Sugarscape 中的一个公民智能体
 type Citizen struct {
-	ID       int     `json:"id"`
-	X        int     `json:"x"`
-	Y        int     `json:"y"`
-	Vision   int     `json:"vision"`   // 视觉范围 v ~ U[1,6]
-	Metabolism int   `json:"metabolism"` // 代谢率 m ~ U[1,4]
-	MaxAge   int     `json:"max_age"`  // 最大年龄 ~ U[60,100]
-	Age      int     `json:"age"`      // 当前年龄
-	Wealth   int     `json:"wealth"`   // 财富（糖存量）
-	Alive    bool    `json:"alive"`    // 是否存活
-	LPCObj   *lpc.Object `json:"-"`   // 关联的 LPC 对象（可选）
+	ID                int         `json:"id"`
+	X                 int         `json:"x"`
+	Y                 int         `json:"y"`
+	Vision            int         `json:"vision"`             // 视觉范围 v ~ U[1,6]
+	Metabolism        int         `json:"metabolism"`          // 代谢率 m ~ U[1,4]
+	MaxAge            int         `json:"max_age"`            // 最大年龄 ~ U[60,100]
+	Age               int         `json:"age"`                // 当前年龄
+	Wealth            int         `json:"wealth"`             // 财富（糖存量）
+	Alive             bool        `json:"alive"`              // 是否存活
+	LPCObj            *lpc.Object `json:"-"`                  // 关联的 LPC 对象（可选）
+	AgentName         string      `json:"agent_name"`         // 接管 agent 名称
+	IsAgentControlled bool        `json:"is_agent_controlled"` // 是否被 agent 接管
+	PendingCommand    bool        `json:"pending_command"`    // 是否有待执行的命令
+	TradeWillingness  int         `json:"trade_willingness"`  // 贸易意愿（LPC 设置）
+	MateWillingness   int         `json:"mate_willingness"`   // 繁殖意愿（LPC 设置）
+	BehaviorType      string      `json:"behavior_type"`      // 行为类型: forager, trader, breeder
 }
 
 // NewCitizen 创建一个新的公民智能体
@@ -62,6 +69,14 @@ func (c *Citizen) LoadScript(source string) error {
 // IsDead 检查公民是否死亡（老死或饿死）
 func (c *Citizen) IsDead() bool {
 	return !c.Alive || c.Age >= c.MaxAge || c.Wealth <= 0
+}
+
+// DeathCause 返回死亡原因
+func (c *Citizen) DeathCause() string {
+	if c.Age >= c.MaxAge {
+		return "age"
+	}
+	return "hunger"
 }
 
 func (c *Citizen) String() string {

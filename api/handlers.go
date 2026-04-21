@@ -30,7 +30,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/cells/", h.handleCellByCoord)
 	mux.HandleFunc("/api/agent/attach", h.handleAgentAttach)
 	mux.HandleFunc("/api/agent/detach", h.handleAgentDetach)
+	mux.HandleFunc("/api/agent/context", h.handleAgentContextGet)
 	mux.HandleFunc("/api/agent/", h.handleAgentContext)
+	mux.HandleFunc("/api/citizens/command", h.handleCitizenCommand)
+	mux.HandleFunc("/api/scoreboard", h.handleScoreboard)
+	mux.HandleFunc("/api/ai/attach", h.handleAIAgentAttach)
+	mux.HandleFunc("/api/ai/detach", h.handleAIAgentDetach)
 }
 
 // writeJSON 写入 JSON 响应
@@ -81,10 +86,8 @@ func (h *Handler) handleCitizens(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// 支持 GET /api/citizens/:id 格式
 	path := strings.TrimPrefix(r.URL.Path, "/api/citizens")
 	if path != "" && path != "/" {
-		// 解析 ID
 		idStr := strings.TrimPrefix(path, "/")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -123,7 +126,6 @@ func (h *Handler) handleCellByCoord(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// 解析 /api/cells/:x/:y
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/cells/"), "/")
 	if len(parts) != 2 {
 		writeError(w, "invalid path, expected /api/cells/:x/:y", http.StatusBadRequest)
@@ -139,14 +141,14 @@ func (h *Handler) handleCellByCoord(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, cell)
 }
 
-// AgentAttachRequest 绑定 agent 请求
+// AgentAttachRequest 绑定 agent 请求（LPC 脚本模式）
 type AgentAttachRequest struct {
 	CitizenID int    `json:"citizen_id"`
 	LPCSource string `json:"lpc_source"`
 	Interval  int    `json:"interval"`
 }
 
-// POST /api/agent/attach - 绑定 AI agent 到 citizen
+// POST /api/agent/attach - 绑定 LPC agent 到 citizen
 func (h *Handler) handleAgentAttach(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -172,7 +174,7 @@ func (h *Handler) handleAgentAttach(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/agent/detach - 解绑
+// POST /api/agent/detach - 解绑 LPC agent
 func (h *Handler) handleAgentDetach(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -196,13 +198,36 @@ func (h *Handler) handleAgentDetach(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/agent/:id/context - 获取 agent 上下文
+// GET /api/agent/context?id=:id - 获取 agent 上下文
+func (h *Handler) handleAgentContextGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		writeError(w, "missing id parameter", http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeError(w, "invalid agent id", http.StatusBadRequest)
+		return
+	}
+	ctx, err := h.World.GetAgentContext(id)
+	if err != nil {
+		writeError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, ctx)
+}
+
+// GET /api/agent/:id/context - 获取 agent 上下文（路径风格）
 func (h *Handler) handleAgentContext(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// 解析 /api/agent/:id/context
 	path := strings.TrimPrefix(r.URL.Path, "/api/agent/")
 	parts := strings.Split(path, "/")
 	if len(parts) < 2 || parts[1] != "context" {
@@ -220,4 +245,104 @@ func (h *Handler) handleAgentContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, ctx)
+}
+
+// CitizenCommandRequest citizen 指令请求
+type CitizenCommandRequest struct {
+	CitizenID int                    `json:"citizen_id"`
+	Action    string                 `json:"action"`
+	Args      map[string]interface{} `json:"args"`
+}
+
+// POST /api/citizens/command - 给被接管的 citizen 下达指令
+func (h *Handler) handleCitizenCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req CitizenCommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Args == nil {
+		req.Args = make(map[string]interface{})
+	}
+	err := h.World.ExecuteCommand(req.CitizenID, req.Action, req.Args)
+	if err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	citizen := h.World.GetCitizenByID(req.CitizenID)
+	writeJSON(w, map[string]interface{}{
+		"status":     "executed",
+		"citizen_id": req.CitizenID,
+		"action":     req.Action,
+		"citizen":    citizen,
+	})
+}
+
+// GET /api/scoreboard - 获取记分板
+func (h *Handler) handleScoreboard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, h.World.Scoreboard)
+}
+
+// AIAgentAttachRequest AI agent 接管请求
+type AIAgentAttachRequest struct {
+	CitizenID int    `json:"citizen_id"`
+	AgentName string `json:"agent_name"`
+}
+
+// POST /api/ai/attach - 绑定 AI agent 到 citizen（接管模式）
+func (h *Handler) handleAIAgentAttach(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req AIAgentAttachRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.AgentName == "" {
+		req.AgentName = "openclaw"
+	}
+	err := h.World.AttachAIAgent(req.CitizenID, req.AgentName)
+	if err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"status":     "attached",
+		"citizen_id": req.CitizenID,
+		"agent_name": req.AgentName,
+	})
+}
+
+// POST /api/ai/detach - 解绑 AI agent
+func (h *Handler) handleAIAgentDetach(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		CitizenID int `json:"citizen_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	err := h.World.DetachAIAgent(req.CitizenID)
+	if err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"status":     "detached",
+		"citizen_id": req.CitizenID,
+	})
 }

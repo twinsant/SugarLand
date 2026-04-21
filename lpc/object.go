@@ -56,6 +56,11 @@ func (o *Object) LoadProgram(prog *ProgramAST) {
 	o.VM = NewVM()
 	o.VM.LoadProgram(prog)
 
+	// 将函数也注册到对象的 Methods 表
+	for name, fn := range prog.Functions {
+		o.Methods[name] = fn
+	}
+
 	// 注册默认 efun
 	o.VM.RegisterEfun("write", func(args []Value) Value {
 		if len(args) > 0 {

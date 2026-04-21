@@ -91,6 +91,19 @@ func TestParserIfElse(t *testing.T) {
 	}
 }
 
+func TestParserElseIf(t *testing.T) {
+	src := `void test(int x) { if (x == 1) { write("one"); } else if (x == 2) { write("two"); } else { write("other"); } }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+	if _, ok := prog.Functions["test"]; !ok {
+		t.Fatal("function 'test' not found")
+	}
+}
+
 func TestParserForLoop(t *testing.T) {
 	src := `void test() { for (int i = 0; i < 10; i++) { write("x"); } }`
 	p := lpc.NewParser(src)
@@ -278,6 +291,50 @@ func TestLoadForagerScript(t *testing.T) {
 	}
 }
 
+func TestLoadTraderScript(t *testing.T) {
+	data, err := os.ReadFile("testdata/trader.lpc")
+	if err != nil {
+		t.Skipf("skipping: %v", err)
+	}
+
+	p := lpc.NewParser(string(data))
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	fn, ok := prog.Functions["heart_beat"]
+	if !ok {
+		t.Fatal("heart_beat function not found")
+	}
+	if fn.ReturnType != "void" {
+		t.Errorf("expected void, got %q", fn.ReturnType)
+	}
+}
+
+func TestLoadBreederScript(t *testing.T) {
+	data, err := os.ReadFile("testdata/breeder.lpc")
+	if err != nil {
+		t.Skipf("skipping: %v", err)
+	}
+
+	p := lpc.NewParser(string(data))
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	fn, ok := prog.Functions["heart_beat"]
+	if !ok {
+		t.Fatal("heart_beat function not found")
+	}
+	if fn.ReturnType != "void" {
+		t.Errorf("expected void, got %q", fn.ReturnType)
+	}
+}
+
 func TestEndToEndForager(t *testing.T) {
 	src := `void heart_beat() {
 		int x = query_x();
@@ -300,7 +357,6 @@ func TestEndToEndForager(t *testing.T) {
 	obj := lpc.NewObject("citizen_1", "Citizen#1")
 	obj.LoadProgram(prog)
 
-	// 注册模拟 efun
 	currentX, currentY := 10, 10
 	obj.VM.RegisterEfun("query_x", func(args []lpc.Value) lpc.Value {
 		return lpc.IntValue(currentX)
@@ -309,7 +365,6 @@ func TestEndToEndForager(t *testing.T) {
 		return lpc.IntValue(currentY)
 	})
 	obj.VM.RegisterEfun("query_cell_sugar", func(args []lpc.Value) lpc.Value {
-		// 模拟：北边糖最多
 		if len(args) >= 2 && args[0].IntVal == 10 && args[1].IntVal == 9 {
 			return lpc.IntValue(5)
 		}
@@ -333,5 +388,210 @@ func TestEndToEndForager(t *testing.T) {
 
 	if currentX != 10 || currentY != 9 {
 		t.Errorf("expected to move to (10,9), got (%d,%d)", currentX, currentY)
+	}
+}
+
+// --- Phase 3: Efun Tests ---
+
+func TestEfunExplode(t *testing.T) {
+	src := `string test() { string result = implode(explode("a,b,c", ","), "-"); return result; }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.RegisterDefaultEfuns()
+	vm.LoadProgram(prog)
+
+	result, err := vm.CallFunc("test", nil)
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.StrVal != "a-b-c" {
+		t.Errorf("expected 'a-b-c', got %q", result.StrVal)
+	}
+}
+
+func TestEfunStrlen(t *testing.T) {
+	src := `int test() { return strlen("hello"); }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.RegisterDefaultEfuns()
+	vm.LoadProgram(prog)
+
+	result, err := vm.CallFunc("test", nil)
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.IntVal != 5 {
+		t.Errorf("expected 5, got %d", result.IntVal)
+	}
+}
+
+func TestEfunSprintf(t *testing.T) {
+	src := `string test() { return sprintf("age=%d", 25); }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.RegisterDefaultEfuns()
+	vm.LoadProgram(prog)
+
+	result, err := vm.CallFunc("test", nil)
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.StrVal != "age=25" {
+		t.Errorf("expected 'age=25', got %q", result.StrVal)
+	}
+}
+
+func TestEfunSortArray(t *testing.T) {
+	src := `int test() {
+		int a = sizeof(explode("3,1,2", ","));
+		return a;
+	}`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.RegisterDefaultEfuns()
+	vm.LoadProgram(prog)
+
+	result, err := vm.CallFunc("test", nil)
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.IntVal != 3 {
+		t.Errorf("expected 3, got %d", result.IntVal)
+	}
+}
+
+func TestEfunAbs(t *testing.T) {
+	src := `int test() { return abs(0 - 42); }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.RegisterDefaultEfuns()
+	vm.LoadProgram(prog)
+
+	result, err := vm.CallFunc("test", nil)
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.IntVal != 42 {
+		t.Errorf("expected 42, got %d", result.IntVal)
+	}
+}
+
+func TestEfunMinMax(t *testing.T) {
+	src := `int test_max() { return max(3, 7); }
+	int test_min() { return min(3, 7); }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.RegisterDefaultEfuns()
+	vm.LoadProgram(prog)
+
+	result, err := vm.CallFunc("test_max", nil)
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.IntVal != 7 {
+		t.Errorf("expected 7, got %d", result.IntVal)
+	}
+
+	result, err = vm.CallFunc("test_min", nil)
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.IntVal != 3 {
+		t.Errorf("expected 3, got %d", result.IntVal)
+	}
+}
+
+func TestVMElseIf(t *testing.T) {
+	src := `int classify(int x) {
+		if (x == 1) { return 10; }
+		else if (x == 2) { return 20; }
+		else if (x == 3) { return 30; }
+		else { return 0; }
+	}`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.LoadProgram(prog)
+
+	tests := []struct {
+		input, expected int
+	}{
+		{1, 10}, {2, 20}, {3, 30}, {5, 0},
+	}
+	for _, tt := range tests {
+		result, err := vm.CallFunc("classify", []lpc.Value{lpc.IntValue(tt.input)})
+		if err != nil {
+			t.Fatalf("call error for input %d: %v", tt.input, err)
+		}
+		if result.IntVal != tt.expected {
+			t.Errorf("classify(%d): expected %d, got %d", tt.input, tt.expected, result.IntVal)
+		}
+	}
+}
+
+func TestVMEfunWithObjManager(t *testing.T) {
+	src := `int test() {
+		all_inventory("dummy");
+		return 42;
+	}`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.ObjManager = lpc.NewObjectManager()
+	vm.RegisterDefaultEfuns()
+	vm.LoadProgram(prog)
+
+	result, err := vm.CallFunc("test", nil)
+	if err != nil {
+		t.Fatalf("call error: %v", err)
+	}
+	if result.IntVal != 42 {
+		t.Errorf("expected 42, got %d", result.IntVal)
 	}
 }
