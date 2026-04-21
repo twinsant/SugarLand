@@ -1,0 +1,52 @@
+// LPC 示例脚本：简单的觅食行为
+// 这个脚本会在每个 heart_beat 被调用时，尝试向附近糖最多的格子移动
+
+void heart_beat() {
+    int x = query_x();
+    int y = query_y();
+    int vision = query_vision();
+    int best_x = x;
+    int best_y = y;
+    int best_sugar = 0;
+    int dx = 0 - vision;
+    int dy = 0 - vision;
+
+    // 向上移动一步到相邻糖最多的格子
+    // 先检查四个方向
+    int s;
+
+    // 检查北
+    s = query_cell_sugar(x, y - 1);
+    if (s > best_sugar) {
+        best_sugar = s;
+        best_x = x;
+        best_y = y - 1;
+    }
+
+    // 检查南
+    s = query_cell_sugar(x, y + 1);
+    if (s > best_sugar) {
+        best_sugar = s;
+        best_x = x;
+        best_y = y + 1;
+    }
+
+    // 检查西
+    s = query_cell_sugar(x - 1, y);
+    if (s > best_sugar) {
+        best_sugar = s;
+        best_x = x - 1;
+        best_y = y;
+    }
+
+    // 检查东
+    s = query_cell_sugar(x + 1, y);
+    if (s > best_sugar) {
+        best_sugar = s;
+        best_x = x + 1;
+        best_y = y;
+    }
+
+    // 移动到最佳位置
+    move(best_x, best_y);
+}

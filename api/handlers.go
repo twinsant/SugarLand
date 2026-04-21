@@ -28,6 +28,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/citizens", h.handleCitizens)
 	mux.HandleFunc("/api/cellspace", h.handleCells)
 	mux.HandleFunc("/api/cells/", h.handleCellByCoord)
+	mux.HandleFunc("/api/agent/attach", h.handleAgentAttach)
+	mux.HandleFunc("/api/agent/detach", h.handleAgentDetach)
+	mux.HandleFunc("/api/agent/", h.handleAgentContext)
 }
 
 // writeJSON 写入 JSON 响应
@@ -134,4 +137,87 @@ func (h *Handler) handleCellByCoord(w http.ResponseWriter, r *http.Request) {
 	}
 	cell := h.World.GetCell(x, y)
 	writeJSON(w, cell)
+}
+
+// AgentAttachRequest 绑定 agent 请求
+type AgentAttachRequest struct {
+	CitizenID int    `json:"citizen_id"`
+	LPCSource string `json:"lpc_source"`
+	Interval  int    `json:"interval"`
+}
+
+// POST /api/agent/attach - 绑定 AI agent 到 citizen
+func (h *Handler) handleAgentAttach(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req AgentAttachRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Interval <= 0 {
+		req.Interval = 1
+	}
+	err := h.World.AttachAgent(req.CitizenID, req.LPCSource, req.Interval)
+	if err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"status":     "attached",
+		"citizen_id": req.CitizenID,
+		"interval":   req.Interval,
+	})
+}
+
+// POST /api/agent/detach - 解绑
+func (h *Handler) handleAgentDetach(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		CitizenID int `json:"citizen_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	err := h.World.DetachAgent(req.CitizenID)
+	if err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"status":     "detached",
+		"citizen_id": req.CitizenID,
+	})
+}
+
+// GET /api/agent/:id/context - 获取 agent 上下文
+func (h *Handler) handleAgentContext(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// 解析 /api/agent/:id/context
+	path := strings.TrimPrefix(r.URL.Path, "/api/agent/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[1] != "context" {
+		writeError(w, "invalid path, expected /api/agent/:id/context", http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.Atoi(parts[0])
+	if err != nil {
+		writeError(w, "invalid agent id", http.StatusBadRequest)
+		return
+	}
+	ctx, err := h.World.GetAgentContext(id)
+	if err != nil {
+		writeError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, ctx)
 }

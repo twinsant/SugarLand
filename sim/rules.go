@@ -1,6 +1,11 @@
 package sim
 
-import "math/rand"
+import (
+	"fmt"
+	"math/rand"
+
+	"github.com/twinsant/sugarland/lpc"
+)
 
 // 核心规则集：按顺序执行 G → M → R
 
@@ -32,7 +37,91 @@ func (w *World) ruleM() {
 		if !c.Alive {
 			continue
 		}
+		// 如果有 LPC heart_beat，先调用它
+		if c.HasHeartBeat() {
+			w.lpcHeartBeat(c)
+		} else {
+			w.moveAndHarvest(c)
+		}
+	}
+}
+
+// lpcHeartBeat 通过 LPC heart_beat 方法执行公民行为
+func (w *World) lpcHeartBeat(c *Citizen) {
+	obj := c.LPCObj
+	if obj == nil || obj.VM == nil {
 		w.moveAndHarvest(c)
+		return
+	}
+
+	// 注册当前 world context 的 efun
+	vm := obj.VM
+	vm.RegisterEfun("query_x", func(args []lpc.Value) lpc.Value {
+		return lpc.IntValue(c.X)
+	})
+	vm.RegisterEfun("query_y", func(args []lpc.Value) lpc.Value {
+		return lpc.IntValue(c.Y)
+	})
+	vm.RegisterEfun("query_sugar", func(args []lpc.Value) lpc.Value {
+		cell := w.GetCell(c.X, c.Y)
+		return lpc.IntValue(int(cell.Sugar))
+	})
+	vm.RegisterEfun("move", func(args []lpc.Value) lpc.Value {
+		if len(args) >= 2 {
+			c.X = args[0].IntVal
+			c.Y = args[1].IntVal
+		}
+		return lpc.Null()
+	})
+	vm.RegisterEfun("query_wealth", func(args []lpc.Value) lpc.Value {
+		return lpc.IntValue(c.Wealth)
+	})
+	vm.RegisterEfun("query_vision", func(args []lpc.Value) lpc.Value {
+		return lpc.IntValue(c.Vision)
+	})
+	vm.RegisterEfun("harvest", func(args []lpc.Value) lpc.Value {
+		cell := w.GetCell(c.X, c.Y)
+		harvested := cell.Harvest(cell.Sugar)
+		c.Wealth += int(harvested)
+		return lpc.IntValue(int(harvested))
+	})
+	vm.RegisterEfun("query_cell_sugar", func(args []lpc.Value) lpc.Value {
+		if len(args) >= 2 {
+			cell := w.GetCell(args[0].IntVal, args[1].IntVal)
+			return lpc.IntValue(int(cell.Sugar))
+		}
+		return lpc.IntValue(0)
+	})
+	vm.RegisterEfun("random", func(args []lpc.Value) lpc.Value {
+		if len(args) > 0 && args[0].IntVal > 0 {
+			return lpc.IntValue(rand.Intn(args[0].IntVal))
+		}
+		return lpc.IntValue(0)
+	})
+	vm.RegisterEfun("write", func(args []lpc.Value) lpc.Value {
+		if len(args) > 0 {
+			fmt.Printf("[LPC Citizen#%d] %s\n", c.ID, args[0].String())
+		}
+		return lpc.Null()
+	})
+
+	// 调用 heart_beat
+	_, err := vm.CallFunc("heart_beat", []lpc.Value{})
+	if err != nil {
+		fmt.Printf("[LPC] Citizen#%d heart_beat error: %v\n", c.ID, err)
+	}
+
+	// LPC 执行完后，仍然执行标准的代谢和衰老
+	cell := w.GetCell(c.X, c.Y)
+	harvested := cell.Harvest(cell.Sugar)
+	c.Wealth += int(harvested)
+	c.Wealth -= c.Metabolism
+	c.Age++
+	if c.Wealth <= 0 {
+		c.Alive = false
+	}
+	if c.Age >= c.MaxAge {
+		c.Alive = false
 	}
 }
 

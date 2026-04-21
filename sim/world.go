@@ -2,8 +2,11 @@ package sim
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
+
+	"github.com/twinsant/sugarland/lpc"
 )
 
 // WorldConfig 世界配置参数
@@ -42,15 +45,19 @@ type World struct {
 	Citizens    map[int]*Citizen    `json:"-"` // 公民字典（ID -> Citizen）
 	NextID      int                 `json:"-"` // 下一个公民 ID
 	rng         *rand.Rand          `json:"-"`
+	HeartBeats  *HeartBeatManager   `json:"-"` // Heart Beat 管理器
+	ObjManager  *lpc.ObjectManager  `json:"-"` // LPC 对象管理器
 }
 
 // NewWorld 创建一个新世界并初始化
 func NewWorld(config WorldConfig) *World {
 	w := &World{
-		Config:   config,
-		Timestep: 0,
-		NextID:   1,
-		rng:      rand.New(rand.NewSource(42)),
+		Config:     config,
+		Timestep:   0,
+		NextID:     1,
+		rng:        rand.New(rand.NewSource(42)),
+		HeartBeats: NewHeartBeatManager(),
+		ObjManager: lpc.NewObjectManager(),
 	}
 	w.initCells()
 	w.initCitizens()
@@ -147,17 +154,85 @@ func (w *World) Step() {
 func (w *World) Reset() {
 	w.Timestep = 0
 	w.NextID = 1
+	w.HeartBeats = NewHeartBeatManager()
+	w.ObjManager = lpc.NewObjectManager()
 	w.initCells()
 	w.initCitizens()
 }
 
+// AttachAgent 绑定 LPC agent 到指定公民
+func (w *World) AttachAgent(citizenID int, lpcSource string, interval int) error {
+	citizen, ok := w.Citizens[citizenID]
+	if !ok {
+		return fmt.Errorf("citizen %d not found", citizenID)
+	}
+
+	err := citizen.LoadScript(lpcSource)
+	if err != nil {
+		return err
+	}
+
+	// 注册 heart beat
+	objID := fmt.Sprintf("citizen_%d", citizenID)
+	w.ObjManager.Add(objID, citizen.LPCObj)
+	w.HeartBeats.Register(objID, citizenID, interval)
+
+	return nil
+}
+
+// DetachAgent 解绑公民的 LPC agent
+func (w *World) DetachAgent(citizenID int) error {
+	citizen, ok := w.Citizens[citizenID]
+	if !ok {
+		return fmt.Errorf("citizen %d not found", citizenID)
+	}
+
+	objID := fmt.Sprintf("citizen_%d", citizenID)
+	w.HeartBeats.Unregister(objID)
+	w.ObjManager.Destroy(objID)
+	citizen.LPCObj = nil
+
+	return nil
+}
+
+// AgentContext 表示 agent 上下文信息
+type AgentContext struct {
+	CitizenID int    `json:"citizen_id"`
+	X         int    `json:"x"`
+	Y         int    `json:"y"`
+	Wealth    int    `json:"wealth"`
+	Vision    int    `json:"vision"`
+	Age       int    `json:"age"`
+	Sugar     int    `json:"sugar"`
+	Timestep  int    `json:"timestep"`
+}
+
+// GetAgentContext 获取公民的 agent 上下文
+func (w *World) GetAgentContext(citizenID int) (*AgentContext, error) {
+	citizen, ok := w.Citizens[citizenID]
+	if !ok {
+		return nil, fmt.Errorf("citizen %d not found", citizenID)
+	}
+	cell := w.GetCell(citizen.X, citizen.Y)
+	return &AgentContext{
+		CitizenID: citizenID,
+		X:         citizen.X,
+		Y:         citizen.Y,
+		Wealth:    citizen.Wealth,
+		Vision:    citizen.Vision,
+		Age:       citizen.Age,
+		Sugar:     int(cell.Sugar),
+		Timestep:  w.Timestep,
+	}, nil
+}
+
 // WorldState 返回世界状态快照（用于 JSON 序列化）
 type WorldState struct {
-	Config      WorldConfig `json:"config"`
-	Timestep    int         `json:"timestep"`
-	Population  int         `json:"population"`
-	TotalSugar  float64     `json:"total_sugar"`
-	TotalCells  int         `json:"total_cells"`
+	Config     WorldConfig `json:"config"`
+	Timestep   int         `json:"timestep"`
+	Population int         `json:"population"`
+	TotalSugar float64     `json:"total_sugar"`
+	TotalCells int         `json:"total_cells"`
 }
 
 // GetState 获取世界状态

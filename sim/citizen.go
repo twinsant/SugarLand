@@ -3,6 +3,8 @@ package sim
 import (
 	"fmt"
 	"math/rand"
+
+	"github.com/twinsant/sugarland/lpc"
 )
 
 // Citizen 表示 Sugarscape 中的一个公民智能体
@@ -16,6 +18,7 @@ type Citizen struct {
 	Age      int     `json:"age"`      // 当前年龄
 	Wealth   int     `json:"wealth"`   // 财富（糖存量）
 	Alive    bool    `json:"alive"`    // 是否存活
+	LPCObj   *lpc.Object `json:"-"`   // 关联的 LPC 对象（可选）
 }
 
 // NewCitizen 创建一个新的公民智能体
@@ -32,6 +35,28 @@ func NewCitizen(id, x, y int, rng *rand.Rand) *Citizen {
 		Wealth:     rng.Intn(21) + 5,   // U[5,25]
 		Alive:      true,
 	}
+}
+
+// HasHeartBeat 检查公民是否有 LPC heart_beat 方法
+func (c *Citizen) HasHeartBeat() bool {
+	if c.LPCObj == nil {
+		return false
+	}
+	_, ok := c.LPCObj.FindMethod("heart_beat")
+	return ok
+}
+
+// LoadScript 加载 LPC 脚本到公民
+func (c *Citizen) LoadScript(source string) error {
+	p := lpc.NewParser(source)
+	prog := p.Parse()
+	if len(p.Errors()) > 0 {
+		return fmt.Errorf("parse errors: %v", p.Errors())
+	}
+	obj := lpc.NewObject(fmt.Sprintf("citizen_%d", c.ID), fmt.Sprintf("Citizen#%d", c.ID))
+	obj.LoadProgram(prog)
+	c.LPCObj = obj
+	return nil
 }
 
 // IsDead 检查公民是否死亡（老死或饿死）
