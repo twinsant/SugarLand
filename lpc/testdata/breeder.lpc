@@ -1,0 +1,51 @@
+// LPC 示例脚本：繁殖行为
+// 当条件满足时产生后代，否则觅食求生
+
+void heart_beat() {
+    int x = query_x();
+    int y = query_y();
+    int wealth = query_wealth();
+    int age = query_age();
+    int max_age = query_max_age();
+
+    // 先觅食求生
+    int best_x = x;
+    int best_y = y;
+    int best_sugar = 0;
+    int s;
+
+    s = query_cell_sugar(x, y - 1);
+    if (s > best_sugar) { best_sugar = s; best_x = x; best_y = y - 1; }
+    s = query_cell_sugar(x, y + 1);
+    if (s > best_sugar) { best_sugar = s; best_x = x; best_y = y + 1; }
+    s = query_cell_sugar(x - 1, y);
+    if (s > best_sugar) { best_sugar = s; best_x = x - 1; best_y = y; }
+    s = query_cell_sugar(x + 1, y);
+    if (s > best_sugar) { best_sugar = s; best_x = x + 1; best_y = y; }
+
+    if (best_sugar == 0) {
+        int dir = random(4);
+        if (dir == 0) {
+            move(x, y - 1);
+        } else if (dir == 1) {
+            move(x, y + 1);
+        } else if (dir == 2) {
+            move(x - 1, y);
+        } else {
+            move(x + 1, y);
+        }
+    } else {
+        move(best_x, best_y);
+    }
+
+    harvest();
+
+    // 繁殖意愿：适龄且富裕
+    if (age > 10) {
+        if (age < max_age - 10) {
+            if (wealth > 30) {
+                set_mate_willingness(1);
+            }
+        }
+    }
+}

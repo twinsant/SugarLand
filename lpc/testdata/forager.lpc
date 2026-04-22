@@ -1,0 +1,61 @@
+// LPC 示例脚本：觅食行为
+// 在视觉范围内找糖最多的格子并移动
+
+void heart_beat() {
+    int x = query_x();
+    int y = query_y();
+    int best_x = x;
+    int best_y = y;
+    int best_sugar = 0;
+    int s;
+
+    // 检查北
+    s = query_cell_sugar(x, y - 1);
+    if (s > best_sugar) {
+        best_sugar = s;
+        best_x = x;
+        best_y = y - 1;
+    }
+
+    // 检查南
+    s = query_cell_sugar(x, y + 1);
+    if (s > best_sugar) {
+        best_sugar = s;
+        best_x = x;
+        best_y = y + 1;
+    }
+
+    // 检查西
+    s = query_cell_sugar(x - 1, y);
+    if (s > best_sugar) {
+        best_sugar = s;
+        best_x = x - 1;
+        best_y = y;
+    }
+
+    // 检查东
+    s = query_cell_sugar(x + 1, y);
+    if (s > best_sugar) {
+        best_sugar = s;
+        best_x = x + 1;
+        best_y = y;
+    }
+
+    // 如果四方向都没有更多糖，随机移动
+    if (best_sugar == 0) {
+        int dir = random(4);
+        if (dir == 0) {
+            move(x, y - 1);
+        } else if (dir == 1) {
+            move(x, y + 1);
+        } else if (dir == 2) {
+            move(x - 1, y);
+        } else {
+            move(x + 1, y);
+        }
+    } else {
+        move(best_x, best_y);
+    }
+
+    harvest();
+}

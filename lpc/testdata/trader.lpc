@@ -1,0 +1,47 @@
+// LPC 示例脚本：贸易行为（Bull 策略）
+// 小量高频交易：当糖过剩时寻找邻居交易
+
+void heart_beat() {
+    int x = query_x();
+    int y = query_y();
+    int wealth = query_wealth();
+
+    // 先觅食
+    int best_x = x;
+    int best_y = y;
+    int best_sugar = 0;
+    int s;
+
+    s = query_cell_sugar(x, y - 1);
+    if (s > best_sugar) { best_sugar = s; best_x = x; best_y = y - 1; }
+    s = query_cell_sugar(x, y + 1);
+    if (s > best_sugar) { best_sugar = s; best_x = x; best_y = y + 1; }
+    s = query_cell_sugar(x - 1, y);
+    if (s > best_sugar) { best_sugar = s; best_x = x - 1; best_y = y; }
+    s = query_cell_sugar(x + 1, y);
+    if (s > best_sugar) { best_sugar = s; best_x = x + 1; best_y = y; }
+
+    if (best_sugar == 0) {
+        int dir = random(4);
+        if (dir == 0) {
+            move(x, y - 1);
+        } else if (dir == 1) {
+            move(x, y + 1);
+        } else if (dir == 2) {
+            move(x - 1, y);
+        } else {
+            move(x + 1, y);
+        }
+    } else {
+        move(best_x, best_y);
+    }
+
+    harvest();
+
+    // Bull 策略：财富超过阈值时尝试小额交易
+    if (wealth > 20) {
+        set_trade_willingness(1);
+    } else {
+        set_trade_willingness(0);
+    }
+}
