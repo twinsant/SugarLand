@@ -1,4 +1,5 @@
-# SugarLand - Go FluffOS Runtime (Phase 1)
+# SugarLand Metaverse No. 25
+AI powered Sugarscape
 
 ## Project Summary
 
@@ -30,95 +31,38 @@ The practical significance of this project is to provide an accessible platform 
 
 ## What is Sugarscape?
 
-## 架构
+Sugarscape is a simulation game designed by Thomas Schelling, an economist at the University of Maryland, in 1969. However, its more significant purpose is to conduct a complex economic experiment to study private property, consumption, and other aspects of human society.
 
-```
-┌──────────────────────────────┐
-│  RESTful API (HTTP)          │  ← 外部 AI Agent / 前端
-└──────────┬───────────────────┘
-           │
-┌──────────▼───────────────────┐
-│  Go FluffOS Runtime (VM)     │
-│  ┌─────────────────────────┐ │
-│  │ Cellspace (50x50 环面)  │ │
-│  │ Citizens (智能体)        │ │
-│  │ Rules: G → M → R        │ │
-│  └─────────────────────────┘ │
-└──────────────────────────────┘
-```
+> Horizontal Inequality
 
-## Phase 1 功能
+Understanding the Sugarscape experiment allows us to think more deeply about capitalism, private property, the free market, trade, finance, and all the issues you care about. To put it simply, through the Sugarscape experiment, you can observe a [...]
 
-- **细胞空间**：50x50 网格，环面拓扑，双峰糖资源地形
-- **公民智能体**：视觉、代谢、年龄、财富属性，均匀分布初始化
-- **核心规则**：生长(G) → 移动(M) → 更替(R)，随机顺序执行
-- **RESTful API**：世界管理、公民查询、地图快照
+* Why are you poor?
+* Why are they rich? Why do I have to spend my whole life to achieve the standard of living that a "rich second generation" is born with?
+* Is it really because you don't work hard enough that you can't afford a 79-yuan eyebrow pencil?
+* What problems can the free market solve, and what can't it? How can the state provide value in the field of public goods?
+* Why should we study Marxism? On the eve of AI potentially dominating human society, why is it important to understand the need for a market economy while adhering to public ownership of the means of production and socialism? [...] 
 
-## 构建和运行
+The Sugarscape experiment is an excellent social experiment game created by international scholars moving away from metaphysical traditional economics. It also provides a great simulation environment for everyone involved in Web3 who hopes to use blockchain technology to transform production relations.
 
-```bash
-# 构建
-go build -o sugarland .
+## Game Design of the Sugarscape Experiment
 
-# 运行（默认端口 8080）
-./sugarland
+Please refer to ["The Origin of Wealth"](https://book.douban.com/subject/34834004/). I won't go into detail here.
 
-# 指定端口
-./sugarland -port 9090
+## AI Sugarscape Experiment
 
-# 自动步进模式（每 500ms 推进一步）
-./sugarland -auto -interval 500ms
-```
+Based on the design of the Sugarscape experiment, we found that the agents are very suitable for simulation using AI Agents. This is the original intention of this project. "Ant" (the author) believes the practical significance of this project far exceeds the "Stanford Small Town" [...]
 
-## API 端点
+We welcome everyone interested in economics to participate, to learn and think about more things together.
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/world` | 世界状态（时间步、人口、配置） |
-| POST | `/api/world/step` | 推进仿真一步 |
-| POST | `/api/world/reset` | 重置世界 |
-| GET | `/api/citizens` | 公民列表 |
-| GET | `/api/citizens/:id` | 公民详情 |
-| GET | `/api/cellspace` | 地图快照（所有格子） |
-| GET | `/api/cells/:x/:y` | 单个格子状态 |
+This project is divided into two repositories (domestic and international) for convenience:
 
-### 示例
+* Main GitHub Repo: https://github.com/twinsant/sugarland/
+* (Deprecated (●`ε´●) Gitee Mirror
 
-```bash
-# 查看世界状态
-curl http://localhost:8080/api/world
+# Refs
 
-# 推进一步
-curl -X POST http://localhost:8080/api/world/step
-
-# 获取第 10 个公民的信息
-curl http://localhost:8080/api/citizens/10
-
-# 获取坐标 (25,25) 的格子状态
-curl http://localhost:8080/api/cells/25/25
-```
-
-## 项目结构
-
-```
-├── main.go           # 主入口，HTTP server
-├── sim/
-│   ├── cell.go       # Cell 结构（糖资源、容量、污染）
-│   ├── cellspace.go  # (内嵌在 world.go 中)
-│   ├── citizen.go    # Citizen 结构（视觉、代谢、年龄、财富）
-│   ├── world.go      # World（初始化、配置、状态）
-│   └── rules.go      # G/M/R 规则实现
-├── api/
-│   └── handlers.go   # RESTful API 处理器
-├── lpc/
-│   └── ast.go        # LPC 语言 AST（Phase 1 占位）
-├── go.mod
-└── README.md
-```
-
-## Phase 2 计划
-
-- 完整的 LPC lexer + parser + interpreter
-- Heart Beat 机制（仿真时间步心跳）
-- Object 继承系统
-- Agent 绑定接口（AI Agent 接管 Citizen）
+* [NotebookLM Resources](https://notebooklm.google.com/notebook/95e9cbad-8a41-4be3-945b-06ef154a615e)
+  * [Sugarscape (Wikipedia)](https://en.wikipedia.org/wiki/Sugarscape)
+  * [The Sugarscape (SourceForge)](https://sugarscape.sourceforge.net/)
+  * [Sugarscape (AgentsExampleZoo.jl)](https://juliadynamics.github.io/AgentsExampleZoo.jl/dev/examples/sugarscape/)
