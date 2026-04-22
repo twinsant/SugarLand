@@ -2,8 +2,10 @@
 package sim
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
+	"time"
 
 	"github.com/twinsant/sugarland/lpc"
 )
@@ -121,8 +123,10 @@ func (w *World) lpcHeartBeat(c *Citizen) {
 		return lpc.Null()
 	})
 
-	// 调用 heart_beat
-	_, err := vm.CallFunc("heart_beat", []lpc.Value{})
+	// 调用 heart_beat（带 1 秒超时保护）
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	_, err := vm.CallFuncWithContext(ctx, "heart_beat", []lpc.Value{})
 	if err != nil {
 		fmt.Printf("[LPC] Citizen#%d heart_beat error: %v\n", c.ID, err)
 	}

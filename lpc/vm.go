@@ -1,16 +1,19 @@
 package lpc
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // Efun 是 LPC 内置函数的 Go 实现
 type Efun func(args []Value) Value
 
 // Environment 表示执行环境，包含变量作用域和函数表
 type Environment struct {
-	vars    map[string]Value
-	parent  *Environment
+	vars      map[string]Value
+	parent    *Environment
 	functions map[string]*FunctionDecl
-	efuns   map[string]Efun
+	efuns     map[string]Efun
 }
 
 // NewEnvironment 创建新的执行环境
@@ -64,10 +67,10 @@ func (e *Environment) SetGlobal(name string, val Value) {
 
 // Value 表示 LPC 运行时值
 type Value struct {
-	Kind    string // "int", "string", "array", "null"
-	IntVal  int
-	StrVal  string
-	ArrVal  []Value
+	Kind   string // "int", "string", "array", "null"
+	IntVal int
+	StrVal string
+	ArrVal []Value
 }
 
 // IntValue 创建整数值
@@ -125,11 +128,31 @@ func (r *ReturnValue) Error() string {
 	return "return"
 }
 
+const (
+	DefaultMaxInstructions = 100000 // 默认最大指令数
+	DefaultMaxCallDepth    = 100    // 默认最大调用栈深度
+)
+
+// ErrInstructionLimit 指令数超限错误
+var ErrInstructionLimit = fmt.Errorf("LPC execution aborted: instruction limit exceeded")
+
+// ErrCallDepthLimit 调用栈深度超限错误
+var ErrCallDepthLimit = fmt.Errorf("LPC execution aborted: call depth limit exceeded")
+
+// ErrContextCanceled 执行超时或被取消
+var ErrContextCanceled = fmt.Errorf("LPC execution aborted: context canceled or timeout")
+
 // VM 是 LPC 虚拟机，负责执行 AST
 type VM struct {
-	Env        *Environment
-	Out        []string         // write() 输出缓冲
-	ObjManager *ObjectManager   // 对象管理器引用（efun 使用）
+	Env              *Environment
+	Out              []string        // write() 输出缓冲
+	ObjManager       *ObjectManager  // 对象管理器引用（efun 使用）
+	Ctx              context.Context // 执行上下文（超时控制）
+	InstructionCount int             // 已执行指令数
+	MaxInstructions  int             // 最大指令数限制（0 = 使用默认值）
+	CallDepth        int             // 当前调用栈深度
+	MaxCallDepth     int             // 最大调用栈深度（0 = 使用默认值）
+	abortErr         error           // evalExpr 中产生的致命错误
 }
 
 // NewVM 创建新的虚拟机
@@ -137,7 +160,47 @@ func NewVM() *VM {
 	return &VM{
 		Env: NewEnvironment(),
 		Out: []string{},
+		Ctx: context.Background(),
 	}
+}
+
+// getMaxInstructions 返回有效的最大指令数
+func (vm *VM) getMaxInstructions() int {
+	if vm.MaxInstructions > 0 {
+		return vm.MaxInstructions
+	}
+	return DefaultMaxInstructions
+}
+
+// getMaxCallDepth 返回有效的最大调用深度
+func (vm *VM) getMaxCallDepth() int {
+	if vm.MaxCallDepth > 0 {
+		return vm.MaxCallDepth
+	}
+	return DefaultMaxCallDepth
+}
+
+// checkLimits 检查执行限制（指令数、超时）
+func (vm *VM) checkLimits() error {
+	vm.InstructionCount++
+	if vm.InstructionCount > vm.getMaxInstructions() {
+		return ErrInstructionLimit
+	}
+	if vm.Ctx != nil {
+		select {
+		case <-vm.Ctx.Done():
+			return ErrContextCanceled
+		default:
+		}
+	}
+	return nil
+}
+
+// ResetCounters 重置执行计数器（每次 CallFunc 前调用）
+func (vm *VM) ResetCounters() {
+	vm.InstructionCount = 0
+	vm.CallDepth = 0
+	vm.abortErr = nil
 }
 
 // RegisterEfun 注册内置函数
@@ -164,6 +227,19 @@ func (vm *VM) LoadProgram(prog *ProgramAST) {
 
 // CallFunc 调用已加载的函数
 func (vm *VM) CallFunc(name string, args []Value) (Value, error) {
+	vm.ResetCounters()
+	return vm.callFunc(name, args)
+}
+
+// CallFuncWithContext 带超时上下文调用函数
+func (vm *VM) CallFuncWithContext(ctx context.Context, name string, args []Value) (Value, error) {
+	vm.Ctx = ctx
+	defer func() { vm.Ctx = context.Background() }()
+	return vm.CallFunc(name, args)
+}
+
+// callFunc 内部函数调用（不重置计数器）
+func (vm *VM) callFunc(name string, args []Value) (Value, error) {
 	// 检查 efun
 	if efun, ok := vm.Env.efuns[name]; ok {
 		return efun(args), nil
@@ -178,6 +254,12 @@ func (vm *VM) CallFunc(name string, args []Value) (Value, error) {
 
 // callFunction 执行用户定义的函数
 func (vm *VM) callFunction(fn *FunctionDecl, args []Value) (Value, error) {
+	vm.CallDepth++
+	if vm.CallDepth > vm.getMaxCallDepth() {
+		return Null(), ErrCallDepthLimit
+	}
+	defer func() { vm.CallDepth-- }()
+
 	scope := vm.Env.PushScope()
 	// 绑定参数
 	for i, param := range fn.Params {
@@ -214,6 +296,12 @@ func (vm *VM) execBlock(block *BlockStmt) error {
 
 // execStmt 执行单条语句
 func (vm *VM) execStmt(stmt Node) error {
+	if vm.abortErr != nil {
+		return vm.abortErr
+	}
+	if err := vm.checkLimits(); err != nil {
+		return err
+	}
 	switch s := stmt.(type) {
 	case *VarDecl:
 		if s.Value != nil {
@@ -229,6 +317,9 @@ func (vm *VM) execStmt(stmt Node) error {
 
 	case *ExprStmt:
 		vm.evalExpr(s.Expr)
+		if vm.abortErr != nil {
+			return vm.abortErr
+		}
 
 	case *IfStmt:
 		cond := vm.evalExpr(s.Cond)
@@ -346,19 +437,13 @@ func (vm *VM) evalExpr(expr Node) Value {
 			name = member.Field
 		}
 
-		// 检查 efun
-		if efun, ok := vm.Env.efuns[name]; ok {
-			return efun(args)
+		// 通过内部 callFunc 调用（保持计数器连续）
+		result, err := vm.callFunc(name, args)
+		if err != nil {
+			vm.abortErr = err
+			return Null()
 		}
-		// 检查用户函数
-		if fn, ok := vm.Env.functions[name]; ok {
-			result, err := vm.callFunction(fn, args)
-			if err != nil {
-				return Null()
-			}
-			return result
-		}
-		return Null()
+		return result
 
 	case *MemberExpr:
 		// 简化：暂不处理复杂成员访问

@@ -2,8 +2,10 @@
 package lpc_test
 
 import (
+	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/twinsant/sugarland/lpc"
 )
@@ -593,5 +595,95 @@ func TestVMEfunWithObjManager(t *testing.T) {
 	}
 	if result.IntVal != 42 {
 		t.Errorf("expected 42, got %d", result.IntVal)
+	}
+}
+
+func TestVMInstructionLimit(t *testing.T) {
+	src := `void test() { while (1) { int x = 1; } }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.MaxInstructions = 100
+	vm.LoadProgram(prog)
+
+	_, err := vm.CallFunc("test", nil)
+	if err == nil {
+		t.Fatal("expected instruction limit error, got nil")
+	}
+	if err != lpc.ErrInstructionLimit {
+		t.Errorf("expected ErrInstructionLimit, got: %v", err)
+	}
+}
+
+func TestVMCallDepthLimit(t *testing.T) {
+	src := `void recurse() { recurse(); }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.MaxCallDepth = 10
+	vm.LoadProgram(prog)
+
+	_, err := vm.CallFunc("recurse", nil)
+	if err == nil {
+		t.Fatal("expected call depth limit error, got nil")
+	}
+	if err != lpc.ErrCallDepthLimit {
+		t.Errorf("expected ErrCallDepthLimit, got: %v", err)
+	}
+}
+
+func TestVMContextTimeout(t *testing.T) {
+	src := `void test() { while (1) { int x = 1; } }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.MaxInstructions = 10000000
+	vm.LoadProgram(prog)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	_, err := vm.CallFuncWithContext(ctx, "test", nil)
+	if err == nil {
+		t.Fatal("expected context canceled error, got nil")
+	}
+	if err != lpc.ErrContextCanceled {
+		t.Errorf("expected ErrContextCanceled, got: %v", err)
+	}
+}
+
+func TestVMNormalExecutionUnaffected(t *testing.T) {
+	src := `int sum() { int total = 0; for (int i = 0; i < 100; i++) { total = total + i; } return total; }`
+	p := lpc.NewParser(src)
+	prog := p.Parse()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parse errors: %v", p.Errors())
+	}
+
+	vm := lpc.NewVM()
+	vm.LoadProgram(prog)
+
+	result, err := vm.CallFunc("sum", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IntVal != 4950 {
+		t.Errorf("expected 4950, got %d", result.IntVal)
 	}
 }
