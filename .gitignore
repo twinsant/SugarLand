@@ -160,3 +160,7 @@ cython_debug/
 #.idea/
 
 sugarland
+
+# Frontend build artifacts and dependencies
+frontend/node_modules/
+frontend/dist/
