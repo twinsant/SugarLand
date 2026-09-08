@@ -1,0 +1,109 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://world.gd" id="1"]
+
+[node name="SugarLand" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1")
+
+[node name="Title" type="Label" parent="."]
+offset_left = 32.0
+offset_top = 20.0
+offset_right = 740.0
+offset_bottom = 58.0
+theme_override_colors/font_color = Color(0.87, 0.96, 0.85, 1)
+theme_override_font_sizes/font_size = 30
+text = "SUGARLAND / 糖域"
+
+[node name="Subtitle" type="Label" parent="."]
+offset_left = 34.0
+offset_top = 61.0
+offset_right = 740.0
+offset_bottom = 86.0
+theme_override_colors/font_color = Color(0.55, 0.67, 0.69, 1)
+text = "50 × 50 环面地图  /  双峰资源地形  /  本地经济仿真"
+
+[node name="Residents" type="Node2D" parent="."]
+
+[node name="Sidebar" type="VBoxContainer" parent="."]
+offset_left = 768.0
+offset_top = 100.0
+offset_right = 1130.0
+offset_bottom = 770.0
+theme_override_constants/separation = 16
+
+[node name="Heading" type="Label" parent="Sidebar"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 0.95, 0.85, 1)
+theme_override_font_sizes/font_size = 25
+text = "经济观察站"
+
+[node name="Status" type="Label" parent="Sidebar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = ""
+
+[node name="Economy" type="Label" parent="Sidebar"]
+unique_name_in_owner = true
+layout_mode = 2
+text = ""
+
+[node name="Controls" type="HBoxContainer" parent="Sidebar"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Pause" type="Button" parent="Sidebar/Controls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "暂停 [空格]"
+
+[node name="Step" type="Button" parent="Sidebar/Controls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "单步 [N]"
+
+[node name="Reset" type="Button" parent="Sidebar/Controls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "重置 [R]"
+
+[node name="Separator" type="HSeparator" parent="Sidebar"]
+layout_mode = 2
+
+[node name="Selection" type="Label" parent="Sidebar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 160)
+layout_mode = 2
+text = "点击居民或格子查看详情"
+autowrap_mode = 2
+
+[node name="Legend" type="Label" parent="Sidebar"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.81, 0.69, 1)
+text = "地形 沙漠黄 → 森林绿：当前糖量\n居民 白色 → 帝王金：财富递增\n白框：选中位置 · 金圈：选中居民"
+
+[node name="Note" type="Label" parent="Sidebar"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.49, 0.61, 0.65, 1)
+text = "生长 → 择地采集 → 代谢 → 死亡补入\n死亡后补足 80 人，新人自带启动糖。\n纯本地单资源模型，无交易或繁殖。"
+autowrap_mode = 2
+
+[node name="Footer" type="Label" parent="."]
+offset_left = 34.0
+offset_top = 800.0
+offset_right = 1120.0
+offset_bottom = 832.0
+theme_override_colors/font_color = Color(0.5, 0.64, 0.68, 1)
+text = "鼠标左键 选择   /   空格 暂停或继续   /   N 单步并暂停   /   R 重置同一种子"
