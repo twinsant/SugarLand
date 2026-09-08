@@ -7,6 +7,8 @@ const TILE_SIZE := 14.0
 const MAP_ORIGIN := Vector2(32, 96)
 const MAP_SIZE := GRID_SIZE * TILE_SIZE
 const STEP_SECONDS := 0.9
+const RECORDING_FPS := 30.0
+const RECORDING_DIR := "user://recordings"
 
 var simulation := Simulation.new()
 var display_sugar := PackedFloat32Array()
@@ -15,11 +17,18 @@ var selected_citizen: Simulation.Citizen
 var selected_cell := Vector2i(-1, -1)
 var running := true
 var elapsed := 0.0
+var recording := false
+var recording_elapsed := 0.0
+var recording_frame := 0
+var recording_path := ""
+var recording_result := ""
 
 @onready var status: Label = %Status
 @onready var economy: Label = %Economy
 @onready var selection: Label = %Selection
 @onready var pause_button: Button = %Pause
+@onready var record_button: Button = %Record
+@onready var recording_status: Label = %RecordingStatus
 
 
 func _ready() -> void:
@@ -31,6 +40,7 @@ func _ready() -> void:
 	pause_button.pressed.connect(toggle_pause)
 	%Reset.pressed.connect(reset)
 	%Step.pressed.connect(single_step)
+	record_button.pressed.connect(toggle_recording)
 	reset()
 
 
@@ -49,12 +59,16 @@ func reset() -> void:
 
 
 func _process(delta: float) -> void:
-	if not running:
-		return
-	elapsed += delta
-	if elapsed >= STEP_SECONDS:
-		elapsed = fmod(elapsed, STEP_SECONDS)
-		advance()
+	if running:
+		elapsed += delta
+		if elapsed >= STEP_SECONDS:
+			elapsed = fmod(elapsed, STEP_SECONDS)
+			advance()
+	if recording:
+		recording_elapsed += delta
+		while recording_elapsed >= 1.0 / RECORDING_FPS:
+			recording_elapsed -= 1.0 / RECORDING_FPS
+			capture_frame()
 
 
 func advance() -> void:
@@ -105,6 +119,76 @@ func _on_harvest_ready(cell: Vector2i) -> void:
 		queue_redraw()
 
 
+func toggle_recording() -> void:
+	recording = not recording
+	if recording:
+		var session_name := "session_%d" % Time.get_ticks_msec()
+		recording_path = "%s/%s" % [RECORDING_DIR, session_name]
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(recording_path))
+		recording_elapsed = 0.0
+		recording_frame = 0
+		recording_result = ""
+		record_button.text = "停止录像 [V]"
+		capture_frame()
+	else:
+		record_button.text = "开始录像 [V]"
+		finish_recording()
+	update_recording_status()
+
+
+func finish_recording() -> void:
+	if recording_frame == 0:
+		recording_result = "录像结束：没有可用帧"
+		return
+	var ffmpeg_path := find_ffmpeg()
+	var input_pattern := ProjectSettings.globalize_path(recording_path) + "/frame_" + "%06d" + ".png"
+	var output_path := ProjectSettings.globalize_path(recording_path + "/sugarland.mp4")
+	var arguments := PackedStringArray([
+		"-y", "-framerate", str(RECORDING_FPS), "-i", input_pattern,
+		"-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+		"-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output_path,
+	])
+	var output: Array[String] = []
+	var exit_code := OS.execute(ffmpeg_path, arguments, output, true)
+	if exit_code == 0:
+		recording_result = "录像完成：%d 帧\n%s" % [recording_frame, recording_path + "/sugarland.mp4"]
+	else:
+		recording_result = "转码失败（%d），PNG 已保留\n%s" % [exit_code, recording_path]
+
+
+func find_ffmpeg() -> String:
+	for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
+		if FileAccess.file_exists(candidate):
+			return candidate
+	return "ffmpeg"
+
+
+func capture_frame() -> void:
+	if not recording or DisplayServer.get_name() == "headless":
+		return
+	var viewport_texture := get_viewport().get_texture()
+	if viewport_texture == null:
+		update_recording_status()
+		return
+	var image := viewport_texture.get_image()
+	if image == null:
+		update_recording_status()
+		return
+	var frame_path := "%s/frame_%06d.png" % [recording_path, recording_frame]
+	if image.save_png(frame_path) == OK:
+		recording_frame += 1
+	update_recording_status()
+
+
+func update_recording_status() -> void:
+	if recording:
+		recording_status.text = "录像中 · %d 帧\n%s" % [recording_frame, recording_path]
+	elif not recording_result.is_empty():
+		recording_status.text = recording_result
+	else:
+		recording_status.text = "录像：未开始"
+
+
 func toggle_pause() -> void:
 	set_running(not running)
 
@@ -124,7 +208,7 @@ func set_running(value: bool) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.keycode in [KEY_SPACE, KEY_R, KEY_N]:
+	if event is InputEventKey and event.keycode in [KEY_SPACE, KEY_R, KEY_N, KEY_V]:
 		get_viewport().set_input_as_handled()
 		if event.pressed and not event.echo:
 			match event.keycode:
@@ -134,6 +218,8 @@ func _input(event: InputEvent) -> void:
 					reset()
 				KEY_N:
 					single_step()
+				KEY_V:
+					toggle_recording()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -161,7 +247,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func update_panel() -> void:
 	var stats := simulation.get_stats()
-	status.text = "第 %04d 轮  /  %s" % [simulation.tick, "运行中" if running else "已暂停"]
+	status.text = "糖域纪年 %03d 年  /  %s" % [simulation.tick, "运行中" if running else "已暂停"]
+	update_recording_status()
 	economy.text = "人口 %d · 累计补入 %d\n总财富 %.1f · 人均 %.1f\n财富基尼 %.3f · 地图存糖 %.1f\n本轮采集 %.1f · 代谢 %.1f\n累计死亡：饥饿 %d / 寿终 %d" % [
 		stats.population, simulation.replacements, stats.total_wealth, stats.mean_wealth,
 		stats.gini, stats.land_sugar, stats.harvested, stats.consumed,

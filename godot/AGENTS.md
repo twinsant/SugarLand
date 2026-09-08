@@ -7,6 +7,7 @@
 - `get_stats()` 的 growth、harvested、consumed、injected_wealth、removed_wealth 均为上一轮预算；removed_wealth 是带符号死者剩余财富，可为负。累计死亡和补入单独记录。Gini 只统计当前存活居民。
 - 经济回合不依赖动画帧率。空格暂停两者；N 或单步按钮执行一轮、立即显示目的地并保持暂停；R 或重置按钮恢复同一种子和初始统计并开始运行。选中居民死亡后保留原因展示，不转移选择到新居民。
 - `simulation.sugar` 是即时经济状态，`world.gd` 的 `display_sugar` 是动画显示状态：每轮先反映生长，已采集地块暂时保留采集前的显示值，居民到达后由 `harvest_ready` 信号切换为采集后的值。这样地块不会在居民移动途中提前变色。
+- 游戏内录像由 `V` 或录像按钮控制，固定 30 FPS 将视口保存为 PNG 序列到 `user://recordings/session_<timestamp>/`，暂停仿真时仍可录制。停止录像时自动查找 ffmpeg，先裁剪到偶数宽高，再生成该目录下的 `sugarland.mp4`；找不到 ffmpeg 或转码失败时保留 PNG。
 - 提交项目、场景、脚本及 Godot 生成的 `.gd.uid`，不要提交 `.godot/` 缓存。已验证本机 Godot 4.7.2，其他机器先确认二进制位置与版本。
 
 在本目录执行：

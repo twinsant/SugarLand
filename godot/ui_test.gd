@@ -44,9 +44,11 @@ func run() -> void:
 	var pause: Button = scene.get_node("%Pause")
 	var step_button: Button = scene.get_node("%Step")
 	var reset_button: Button = scene.get_node("%Reset")
+	var record_button: Button = scene.get_node("%Record")
 	var selection: Label = scene.get_node("%Selection")
 	var economy: Label = scene.get_node("%Economy")
 	var status: Label = scene.get_node("%Status")
+	var recording_status: Label = scene.get_node("%RecordingStatus")
 	var initial_economy := economy.text
 	var first = scene.simulation.citizens[0]
 	var initial_cell: Vector2i = first.cell
@@ -79,6 +81,14 @@ func run() -> void:
 	check(scene.simulation.tick == 0 and scene.running, "Reset button must restart the clock")
 	check(economy.text == initial_economy, "Reset must restore initial economic statistics")
 	check(scene.simulation.citizens[0].cell == initial_cell and scene.simulation.citizens[0].wealth == initial_wealth, "Reset must restore initial residents")
+	click(record_button.get_global_rect().get_center())
+	check(scene.recording and record_button.text.begins_with("停止录像"), "Record button must start frame capture")
+	await create_timer(0.1).timeout
+	check(recording_status.text.contains("录像中"), "Recording status must update while paused")
+	if DisplayServer.get_name() != "headless":
+		check(scene.recording_frame > 0, "Recording must write PNG frames while paused")
+	click(record_button.get_global_rect().get_center())
+	check(not scene.recording and recording_status.text.contains("录像结束"), "Record button must stop frame capture")
 	key(KEY_SPACE)
 	check(not scene.running, "Space must pause even when Reset has focus")
 	click(Vector2(39, 103))

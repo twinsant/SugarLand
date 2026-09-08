@@ -79,6 +79,20 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "重置 [R]"
 
+[node name="Record" type="Button" parent="Sidebar/Controls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "开始录像 [V]"
+
+[node name="RecordingStatus" type="Label" parent="Sidebar"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.44, 0.72, 0.78, 1)
+text = "录像：未开始"
+autowrap_mode = 2
+
 [node name="Separator" type="HSeparator" parent="Sidebar"]
 layout_mode = 2
 
@@ -92,7 +106,7 @@ autowrap_mode = 2
 [node name="Legend" type="Label" parent="Sidebar"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.7, 0.81, 0.69, 1)
-text = "地形 沙漠黄 → 森林绿：当前糖量\n居民 白色 → 帝王金：财富递增\n白框：选中位置 · 金圈：选中居民"
+text = "地形 沙漠黄 → 森林绿：当前糖量\n居民 白色 → 帝王金：财富递增\n白框：选中位置 · 海蓝圈：选中居民"
 
 [node name="Note" type="Label" parent="Sidebar"]
 layout_mode = 2
@@ -106,4 +120,4 @@ offset_top = 800.0
 offset_right = 1120.0
 offset_bottom = 832.0
 theme_override_colors/font_color = Color(0.5, 0.64, 0.68, 1)
-text = "鼠标左键 选择   /   空格 暂停或继续   /   N 单步并暂停   /   R 重置同一种子"
+text = "鼠标左键 选择   /   空格 暂停或继续   /   N 单步   /   R 重置   /   V 开始或停止录像"

@@ -60,8 +60,8 @@ func _draw() -> void:
 	var stride := sin(travel * TAU * 2.0) * 1.8 if travel < 1.0 else 0.0
 	if selected:
 		var radius := (vision + 0.5) * tile_size
-		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, Color("fff1ad"), 1.2, true)
-		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, Color(1, 1, 1, 0.18), 0.8, true)
+		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, Color("45c7e8"), 1.4, true)
+		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, Color(0.45, 0.88, 1.0, 0.28), 0.8, true)
 	draw_set_transform(Vector2(0, 3), 0.0, Vector2(1.0, 0.4))
 	draw_circle(Vector2.ZERO, 5.0, Color(0, 0, 0, 0.3))
 	draw_set_transform(Vector2.ZERO)
