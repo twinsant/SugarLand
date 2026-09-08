@@ -1,6 +1,9 @@
 # SugarLand Metaverse No. 25
 AI powered Sugarscape
 
+<img width="1173" height="802" alt="image" src="https://github.com/user-attachments/assets/e7d4973a-924a-4974-8db9-9fa46e53c89a" />
+
+
 ## Project Summary
 
 SugarLand is an AI-powered reimplementation of the classic [Sugarscape](https://en.wikipedia.org/wiki/Sugarscape) agent-based model (ABM), originally conceived by Epstein & Axtell in *Growing Artificial Societies* (1996). The project replaces traditional hard-coded agents with **AI Agents**, enabling richer emergent social behavior in a simulated economy.
