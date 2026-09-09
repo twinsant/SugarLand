@@ -4,8 +4,14 @@ const Simulation = preload("res://simulation.gd")
 const Resident = preload("res://resident.gd")
 const GRID_SIZE := Simulation.GRID_SIZE
 const TILE_SIZE := 14.0
-const MAP_ORIGIN := Vector2(32, 96)
+const MAP_ORIGIN := Vector2(32, 10)
 const MAP_SIZE := GRID_SIZE * TILE_SIZE
+const MAP_VIEW_RECT := Rect2(0, 86, 750, 710)
+const MIN_ZOOM := 0.75
+const MAX_ZOOM := 3.0
+const ZOOM_STEP := 1.15
+const FOLLOW_MARGIN_CELLS := 2.0
+const FOLLOW_SMOOTHNESS := 8.0
 const STEP_SECONDS := 0.9
 const RECORDING_FPS := 30.0
 const RECORDING_DIR := "user://recordings"
@@ -22,13 +28,20 @@ var recording_elapsed := 0.0
 var recording_frame := 0
 var recording_path := ""
 var recording_result := ""
+var panning := false
+var following_selected := false
+var map_pan_target := Vector2.ZERO
 
+@onready var map_clip: Control = $MapClip
+@onready var map_layer: Node2D = $MapClip/MapLayer
+@onready var residents_root: Node2D = $MapClip/MapLayer/Residents
 @onready var status: Label = %Status
 @onready var economy: Label = %Economy
 @onready var selection: Label = %Selection
 @onready var pause_button: Button = %Pause
 @onready var record_button: Button = %Record
 @onready var recording_status: Label = %RecordingStatus
+@onready var zoom_status: Label = %ZoomStatus
 
 
 func _ready() -> void:
@@ -53,9 +66,10 @@ func reset() -> void:
 	simulation.reset()
 	display_sugar = simulation.sugar.duplicate()
 	elapsed = 0.0
+	reset_map_view()
 	sync_residents(false)
 	set_running(true)
-	queue_redraw()
+	update_map_layer()
 
 
 func _process(delta: float) -> void:
@@ -64,6 +78,7 @@ func _process(delta: float) -> void:
 		if elapsed >= STEP_SECONDS:
 			elapsed = fmod(elapsed, STEP_SECONDS)
 			advance()
+	update_selected_follow(delta)
 	if recording:
 		recording_elapsed += delta
 		while recording_elapsed >= 1.0 / RECORDING_FPS:
@@ -80,7 +95,7 @@ func advance() -> void:
 	if selected_citizen != null:
 		selected_cell = selected_citizen.cell
 	update_panel()
-	queue_redraw()
+	update_map_layer()
 
 
 func sync_residents(animate: bool) -> void:
@@ -93,7 +108,7 @@ func sync_residents(animate: bool) -> void:
 			resident.citizen_id = citizen.id
 			resident.map_bounds = Rect2(MAP_ORIGIN, Vector2.ONE * MAP_SIZE)
 			resident.harvest_ready.connect(_on_harvest_ready)
-			$Residents.add_child(resident)
+			residents_root.add_child(resident)
 			residents[citizen.id] = resident
 			resident.place_at(citizen.cell, cell_center(citizen.cell), citizen.last_harvest)
 		elif animate:
@@ -104,6 +119,7 @@ func sync_residents(animate: bool) -> void:
 		resident.vision = citizen.vision
 		resident.tile_size = TILE_SIZE
 		resident.selected = citizen == selected_citizen
+		resident.set_thought(thought_for(citizen) if resident.selected else "")
 		resident.set_process(running)
 		resident.queue_redraw()
 	for citizen_id: int in residents.keys():
@@ -116,7 +132,53 @@ func _on_harvest_ready(cell: Vector2i) -> void:
 	var index := cell.y * GRID_SIZE + cell.x
 	if index >= 0 and index < simulation.sugar.size():
 		display_sugar[index] = simulation.sugar[index]
-		queue_redraw()
+		update_map_layer()
+
+
+func update_map_layer() -> void:
+	map_layer.set("display_sugar", display_sugar)
+	map_layer.set("selected_cell", selected_cell)
+	map_layer.queue_redraw()
+
+
+func reset_map_view() -> void:
+	map_layer.position = Vector2.ZERO
+	map_layer.scale = Vector2.ONE
+	map_pan_target = map_layer.position
+	following_selected = false
+	update_zoom_status()
+
+
+func update_zoom_status() -> void:
+	zoom_status.text = "地图缩放 %d%%" % roundi(map_layer.scale.x * 100.0)
+
+
+func update_selected_follow(delta: float) -> void:
+	if selected_citizen == null:
+		return
+	var resident: Resident = residents.get(selected_citizen.id)
+	if resident == null:
+		return
+	var resident_global := map_layer.to_global(resident.position)
+	var margin := FOLLOW_MARGIN_CELLS * TILE_SIZE * map_layer.scale.x
+	var follow_rect := map_clip.get_global_rect().grow(-margin)
+	if not following_selected and follow_rect.has_point(resident_global):
+		return
+	following_selected = true
+	map_pan_target = map_clip.size * 0.5 - resident.position * map_layer.scale.x
+	var blend := 1.0 - exp(-FOLLOW_SMOOTHNESS * delta)
+	map_layer.position = map_layer.position.lerp(map_pan_target, blend)
+
+
+func zoom_at(global_point: Vector2, factor: float) -> void:
+	var before := map_layer.to_local(global_point)
+	var next_zoom := clampf(map_layer.scale.x * factor, MIN_ZOOM, MAX_ZOOM)
+	if is_equal_approx(next_zoom, map_layer.scale.x):
+		return
+	map_layer.scale = Vector2.ONE * next_zoom
+	update_zoom_status()
+	var after := map_layer.to_local(global_point)
+	map_layer.position += (after - before) * next_zoom
 
 
 func toggle_recording() -> void:
@@ -208,7 +270,7 @@ func set_running(value: bool) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.keycode in [KEY_SPACE, KEY_R, KEY_N, KEY_V]:
+	if event is InputEventKey and event.keycode in [KEY_SPACE, KEY_R, KEY_N, KEY_V, KEY_0]:
 		get_viewport().set_input_as_handled()
 		if event.pressed and not event.echo:
 			match event.keycode:
@@ -220,29 +282,85 @@ func _input(event: InputEvent) -> void:
 					single_step()
 				KEY_V:
 					toggle_recording()
+				KEY_0:
+					reset_map_view()
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		var point: Vector2 = make_input_local(event).position
-		if not Rect2(MAP_ORIGIN, Vector2.ONE * MAP_SIZE).has_point(point):
+	if event is InputEventMagnifyGesture:
+		if map_clip.get_global_rect().has_point(event.position):
+			zoom_at(event.position, event.factor)
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventPanGesture:
+		pan_map(-event.delta)
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseButton:
+		if event.button_index in [MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT]:
+			panning = event.pressed
+			get_viewport().set_input_as_handled()
 			return
-		selected_citizen = null
-		var nearest := 10.0
-		for citizen in simulation.citizens:
-			var resident: Resident = residents[citizen.id]
-			var distance := resident.position.distance_to(point)
-			if distance < nearest:
-				nearest = distance
-				selected_citizen = citizen
-		selected_cell = Vector2i((point - MAP_ORIGIN) / TILE_SIZE)
-		if selected_citizen != null:
-			selected_cell = selected_citizen.cell
-		for resident: Resident in residents.values():
-			resident.selected = selected_citizen != null and resident.citizen_id == selected_citizen.id
-			resident.queue_redraw()
-		update_panel()
-		queue_redraw()
+		if event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and event.pressed:
+			if map_clip.get_global_rect().has_point(event.position):
+				var factor := ZOOM_STEP if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / ZOOM_STEP
+				zoom_at(event.position, factor)
+				get_viewport().set_input_as_handled()
+			return
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			select_at(event.position)
+			return
+	if event is InputEventMouseMotion and panning:
+		pan_map(event.relative)
+		get_viewport().set_input_as_handled()
+
+
+func pan_map(delta: Vector2) -> void:
+	map_layer.position += delta
+	map_pan_target = map_layer.position
+	following_selected = false
+
+
+func thought_for(citizen: Simulation.Citizen) -> String:
+	var current_sugar := simulation.sugar[citizen.cell.y * GRID_SIZE + citizen.cell.x]
+	var best_sugar := current_sugar
+	for direction: Vector2i in Simulation.DIRECTIONS:
+		for distance in range(1, citizen.vision + 1):
+			var raw := citizen.cell + direction * distance
+			var cell := Vector2i(posmod(raw.x, GRID_SIZE), posmod(raw.y, GRID_SIZE))
+			best_sugar = maxf(best_sugar, simulation.sugar[cell.y * GRID_SIZE + cell.x])
+	if citizen.wealth <= citizen.metabolism * 2:
+		return "我需要糖！"
+	if best_sugar > current_sugar + 0.1:
+		return "去找更肥的糖田"
+	if current_sugar > 0.1:
+		return "这里还有糖，先采集"
+	return "附近没有糖，继续寻找"
+
+
+func select_at(global_point: Vector2) -> void:
+	var point := map_layer.to_local(global_point)
+	if not Rect2(MAP_ORIGIN, Vector2.ONE * MAP_SIZE).has_point(point):
+		return
+	selected_citizen = null
+	following_selected = false
+	var nearest := 10.0
+	for citizen in simulation.citizens:
+		var resident: Resident = residents[citizen.id]
+		var distance := resident.position.distance_to(point)
+		if distance < nearest:
+			nearest = distance
+			selected_citizen = citizen
+	selected_cell = Vector2i((point - MAP_ORIGIN) / TILE_SIZE)
+	if selected_citizen != null:
+		selected_cell = selected_citizen.cell
+	for citizen in simulation.citizens:
+		var resident: Resident = residents[citizen.id]
+		resident.selected = selected_citizen != null and resident.citizen_id == selected_citizen.id
+		resident.set_thought(thought_for(citizen) if resident.selected else "")
+		resident.queue_redraw()
+	update_panel()
+	update_map_layer()
 
 
 func update_panel() -> void:
@@ -273,19 +391,6 @@ func update_panel() -> void:
 			selected_citizen.id, cell_info, selected_citizen.wealth, selected_citizen.last_harvest,
 			selected_citizen.metabolism, selected_citizen.vision, selected_citizen.age, selected_citizen.max_age,
 		]
-
-
-func _draw() -> void:
-	if simulation.sugar.is_empty():
-		return
-	draw_rect(Rect2(MAP_ORIGIN - Vector2.ONE * 2, Vector2.ONE * (MAP_SIZE + 4)), Color("53685e"), false, 2.0)
-	for y in GRID_SIZE:
-		for x in GRID_SIZE:
-			var richness := display_sugar[y * GRID_SIZE + x] / 4.0
-			var color := Color("d3b86e").lerp(Color("245b3c"), richness)
-			draw_rect(Rect2(MAP_ORIGIN + Vector2(x, y) * TILE_SIZE, Vector2.ONE * (TILE_SIZE - 0.7)), color)
-	if selected_cell.x >= 0:
-		draw_rect(Rect2(MAP_ORIGIN + Vector2(selected_cell) * TILE_SIZE, Vector2.ONE * TILE_SIZE), Color("fff6dc"), false, 2.0)
 
 
 func cell_center(cell: Vector2i) -> Vector2:
