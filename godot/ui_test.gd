@@ -41,6 +41,19 @@ func run() -> void:
 	var scene = load("res://main.tscn").instantiate()
 	root.add_child(scene)
 	await process_frame
+	check(scene.game_started and scene.tutorial_mode and not scene.running, "Game must open directly in the paused world tutorial")
+	var guide = scene.tutorial_guide
+	var visible_residents := 0
+	for resident in scene.residents.values():
+		if resident.visible:
+			visible_residents += 1
+	check(visible_residents == 1, "World tutorial must show exactly one real resident")
+	check(guide.get_parent() == scene.residents[scene.simulation.citizens[0].id] and guide.bubble.text.contains("欢迎") and guide.next_button.visible, "World tutorial must attach its bubble to the real guide resident")
+	var intro_text: String = guide.bubble.text
+	click(guide.next_button.get_global_rect().get_center())
+	check(guide.bubble.text != intro_text, "World tutorial next button must advance JSON pages")
+	scene.finish_tutorial()
+	check(not scene.tutorial_mode and scene.running, "Finishing tutorial must start the current game logic")
 	var pause: Button = scene.get_node("%Pause")
 	var step_button: Button = scene.get_node("%Step")
 	var reset_button: Button = scene.get_node("%Reset")
@@ -63,7 +76,20 @@ func run() -> void:
 	click(first_view.get_global_position())
 	check(selection.text.contains("居民 #001"), "Resident click must show its identity")
 	check(selection.text.contains("财富") and selection.text.contains("代谢"), "Resident details must show economic attributes")
-	check(first_view.get_node("ThoughtBubble").visible and first_view.get_node("ThoughtBubble").text.contains("糖"), "Selected resident must show a thought bubble")
+	check(first_view.get_node("ThoughtBubble").visible and first_view.get_node("ThoughtBubble").text.contains("#001") and first_view.get_node("ThoughtBubble").text.contains("糖"), "Selected resident bubble must show its identity and thought")
+	check(scene.fog_enabled and scene.fog_layer.visible, "Selecting a resident must automatically show fog")
+	key(KEY_F)
+	check(not scene.fog_enabled and not scene.fog_layer.visible, "F must hide the selected resident's fog")
+	key(KEY_F)
+	check(scene.fog_enabled and scene.fog_layer.visible, "F must show the selected resident's fog")
+	key(KEY_E)
+	check(scene.manual_controlled and scene.fog_enabled and scene.fog_layer.visible, "E must take over the selected resident and force fog on")
+	key(KEY_RIGHT)
+	check(scene.simulation.manual_commands.has(first.id), "Arrow key must queue a manual resident move")
+	key(KEY_F)
+	check(scene.fog_enabled, "Fog must stay on during manual takeover")
+	key(KEY_E)
+	check(not scene.manual_controlled, "E must release manual takeover")
 	click(step_button.get_global_rect().get_center())
 	check(scene.simulation.tick == 1 and not scene.running, "Step button must advance exactly one round and pause")
 	check(first.age == 1, "A single round must age a resident once")
@@ -78,8 +104,20 @@ func run() -> void:
 	first.wealth = 100.0
 	first.max_age = first.age + 1
 	key(KEY_N)
-	check(selection.text.contains("已寿终"), "Selection must report death instead of accessing a freed view")
+	var richest = scene.simulation.citizens[0]
+	for citizen in scene.simulation.citizens:
+		if citizen.wealth > richest.wealth:
+			richest = citizen
+	check(scene.selected_citizen == richest, "Selected resident death must choose the richest resident first")
 	check(scene.get_node("MapClip/MapLayer/Residents").get_child_count() == 80, "Death replacement must preserve 80 visible residents")
+	check(scene.death_markers.size() > 0, "Death must create a skull marker")
+	richest.max_age = richest.age + 1
+	key(KEY_N)
+	var poorest = scene.simulation.citizens[0]
+	for citizen in scene.simulation.citizens:
+		if citizen.wealth < poorest.wealth:
+			poorest = citizen
+	check(scene.selected_citizen == poorest, "Next selected resident death must choose the poorest resident")
 	click(reset_button.get_global_rect().get_center())
 	check(scene.simulation.tick == 0 and scene.running, "Reset button must restart the clock")
 	check(economy.text == initial_economy, "Reset must restore initial economic statistics")
@@ -103,7 +141,7 @@ func run() -> void:
 	pan.position = Vector2(350, 400)
 	pan.delta = Vector2(18, 12)
 	root.push_input(pan, true)
-	check(scene.map_layer.position == before_pan - pan.delta, "Trackpad pan must follow Apple's natural content direction")
+	check(scene.map_layer.position == before_pan - pan.delta * scene.TRACKPAD_PAN_SENSITIVITY, "Trackpad pan must follow Apple's natural content direction with sensitivity compensation")
 	var magnify := InputEventMagnifyGesture.new()
 	magnify.position = Vector2(350, 400)
 	magnify.factor = 1.1

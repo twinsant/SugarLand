@@ -2,6 +2,8 @@ extends Control
 
 const Simulation = preload("res://simulation.gd")
 const Resident = preload("res://resident.gd")
+const DeathMarker = preload("res://death_marker.gd")
+const TutorialGuide = preload("res://tutorial_guide.gd")
 const GRID_SIZE := Simulation.GRID_SIZE
 const TILE_SIZE := 14.0
 const MAP_ORIGIN := Vector2(32, 10)
@@ -10,6 +12,7 @@ const MAP_VIEW_RECT := Rect2(0, 86, 750, 710)
 const MIN_ZOOM := 0.75
 const MAX_ZOOM := 3.0
 const ZOOM_STEP := 1.15
+const TRACKPAD_PAN_SENSITIVITY := 32.0
 const FOLLOW_MARGIN_CELLS := 2.0
 const FOLLOW_SMOOTHNESS := 8.0
 const STEP_SECONDS := 0.9
@@ -19,6 +22,7 @@ const RECORDING_DIR := "user://recordings"
 var simulation := Simulation.new()
 var display_sugar := PackedFloat32Array()
 var residents: Dictionary = {}
+var death_markers: Array[DeathMarker] = []
 var selected_citizen: Simulation.Citizen
 var selected_cell := Vector2i(-1, -1)
 var running := true
@@ -31,10 +35,17 @@ var recording_result := ""
 var panning := false
 var following_selected := false
 var map_pan_target := Vector2.ZERO
+var fog_enabled := false
+var manual_controlled := false
+var game_started := false
+var tutorial_mode := false
+var tutorial_guide: TutorialGuide
+var next_death_select_richest := true
 
 @onready var map_clip: Control = $MapClip
 @onready var map_layer: Node2D = $MapClip/MapLayer
 @onready var residents_root: Node2D = $MapClip/MapLayer/Residents
+@onready var fog_layer: Node2D = $MapClip/MapLayer/FogLayer
 @onready var status: Label = %Status
 @onready var economy: Label = %Economy
 @onready var selection: Label = %Selection
@@ -55,30 +66,71 @@ func _ready() -> void:
 	%Step.pressed.connect(single_step)
 	record_button.pressed.connect(toggle_recording)
 	reset()
+	start_tutorial()
 
 
 func reset() -> void:
 	selected_citizen = null
+	if is_instance_valid(tutorial_guide):
+		tutorial_guide.queue_free()
+	tutorial_guide = null
+	tutorial_mode = false
+	manual_controlled = false
+	next_death_select_richest = true
 	selected_cell = Vector2i(-1, -1)
 	for resident: Resident in residents.values():
 		resident.free()
 	residents.clear()
+	for marker: DeathMarker in death_markers:
+		if is_instance_valid(marker):
+			marker.free()
+	death_markers.clear()
 	simulation.reset()
 	display_sugar = simulation.sugar.duplicate()
 	elapsed = 0.0
 	reset_map_view()
 	sync_residents(false)
-	set_running(true)
+	set_running(game_started)
 	update_map_layer()
 
 
+func start_tutorial() -> void:
+	game_started = true
+	tutorial_mode = true
+	set_running(false)
+	var guide_resident: Resident = residents[simulation.citizens[0].id]
+	for resident: Resident in residents.values():
+		resident.visible = resident == guide_resident
+		resident.set_process(false)
+	guide_resident.place_at(Vector2i(25, 25), cell_center(Vector2i(25, 25)))
+	guide_resident.selected = false
+	guide_resident.set_thought("")
+	guide_resident.set_bubble_viewport(map_clip.get_global_rect())
+	tutorial_guide = TutorialGuide.new()
+	tutorial_guide.finished.connect(finish_tutorial)
+	guide_resident.add_child(tutorial_guide)
+	tutorial_guide.position = Vector2.ZERO
+
+
+func finish_tutorial() -> void:
+	if is_instance_valid(tutorial_guide):
+		tutorial_guide.queue_free()
+	tutorial_guide = null
+	tutorial_mode = false
+	game_started = true
+	reset()
+
+
 func _process(delta: float) -> void:
+	if not game_started:
+		return
 	if running:
 		elapsed += delta
 		if elapsed >= STEP_SECONDS:
 			elapsed = fmod(elapsed, STEP_SECONDS)
 			advance()
 	update_selected_follow(delta)
+	update_fog_layer()
 	if recording:
 		recording_elapsed += delta
 		while recording_elapsed >= 1.0 / RECORDING_FPS:
@@ -87,7 +139,13 @@ func _process(delta: float) -> void:
 
 
 func advance() -> void:
+	var selected_before := selected_citizen
 	simulation.step()
+	var selected_died := selected_before != null and not simulation.citizens.has(selected_before) and not selected_before.death_reason.is_empty()
+	if selected_died:
+		select_extreme_citizen(next_death_select_richest)
+		next_death_select_richest = not next_death_select_richest
+	spawn_death_markers()
 	display_sugar = simulation.sugar.duplicate()
 	for index in simulation.harvested_by_cell:
 		display_sugar[index] = simulation.harvested_by_cell[index]
@@ -96,6 +154,26 @@ func advance() -> void:
 		selected_cell = selected_citizen.cell
 	update_panel()
 	update_map_layer()
+
+
+func select_extreme_citizen(richest: bool) -> void:
+	var candidate: Simulation.Citizen
+	for citizen in simulation.citizens:
+		if candidate == null or (richest and citizen.wealth > candidate.wealth) or (not richest and citizen.wealth < candidate.wealth):
+			candidate = citizen
+	if candidate == null:
+		return
+	selected_citizen = candidate
+	selected_cell = candidate.cell
+	manual_controlled = false
+
+
+func spawn_death_markers() -> void:
+	for death in simulation.death_events:
+		var marker: DeathMarker = DeathMarker.new()
+		marker.position = cell_center(death["cell"])
+		map_layer.add_child(marker)
+		death_markers.append(marker)
 
 
 func sync_residents(animate: bool) -> void:
@@ -107,6 +185,7 @@ func sync_residents(animate: bool) -> void:
 			resident = Resident.new()
 			resident.citizen_id = citizen.id
 			resident.map_bounds = Rect2(MAP_ORIGIN, Vector2.ONE * MAP_SIZE)
+			resident.set_bubble_viewport(map_clip.get_global_rect())
 			resident.harvest_ready.connect(_on_harvest_ready)
 			residents_root.add_child(resident)
 			residents[citizen.id] = resident
@@ -139,6 +218,15 @@ func update_map_layer() -> void:
 	map_layer.set("display_sugar", display_sugar)
 	map_layer.set("selected_cell", selected_cell)
 	map_layer.queue_redraw()
+
+
+func update_fog_layer() -> void:
+	if not fog_enabled or selected_citizen == null or not residents.has(selected_citizen.id):
+		fog_layer.set_fog(false, Vector2.ZERO, 0.0, 0.0)
+		return
+	var resident: Resident = residents[selected_citizen.id]
+	var radius := (resident.vision + 0.5) * TILE_SIZE
+	fog_layer.set_fog(true, resident.position, radius, TILE_SIZE * 3.0)
 
 
 func reset_map_view() -> void:
@@ -179,6 +267,29 @@ func zoom_at(global_point: Vector2, factor: float) -> void:
 	update_zoom_status()
 	var after := map_layer.to_local(global_point)
 	map_layer.position += (after - before) * next_zoom
+
+
+func toggle_user_control() -> void:
+	if selected_citizen == null:
+		return
+	manual_controlled = not manual_controlled
+	simulation.set_manual_control(selected_citizen.id, manual_controlled)
+	if manual_controlled:
+		fog_enabled = true
+	update_fog_layer()
+	update_panel()
+
+
+func queue_user_move(direction: Vector2i) -> void:
+	if manual_controlled and selected_citizen != null:
+		simulation.queue_manual_move(selected_citizen.id, direction)
+
+
+func toggle_fog() -> void:
+	if manual_controlled:
+		return
+	fog_enabled = not fog_enabled
+	update_fog_layer()
 
 
 func toggle_recording() -> void:
@@ -270,7 +381,14 @@ func set_running(value: bool) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.keycode in [KEY_SPACE, KEY_R, KEY_N, KEY_V, KEY_0]:
+	if not game_started:
+		return
+	if tutorial_mode:
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_SPACE, KEY_ENTER, KEY_RIGHT]:
+			tutorial_guide.next_page()
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.keycode in [KEY_SPACE, KEY_R, KEY_N, KEY_V, KEY_0, KEY_F, KEY_E, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]:
 		get_viewport().set_input_as_handled()
 		if event.pressed and not event.echo:
 			match event.keycode:
@@ -284,16 +402,30 @@ func _input(event: InputEvent) -> void:
 					toggle_recording()
 				KEY_0:
 					reset_map_view()
+				KEY_F:
+					toggle_fog()
+				KEY_E:
+					toggle_user_control()
+				KEY_UP:
+					queue_user_move(Vector2i.UP)
+				KEY_DOWN:
+					queue_user_move(Vector2i.DOWN)
+				KEY_LEFT:
+					queue_user_move(Vector2i.LEFT)
+				KEY_RIGHT:
+					queue_user_move(Vector2i.RIGHT)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not game_started or tutorial_mode:
+		return
 	if event is InputEventMagnifyGesture:
 		if map_clip.get_global_rect().has_point(event.position):
 			zoom_at(event.position, event.factor)
 			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventPanGesture:
-		pan_map(-event.delta)
+		pan_map(-event.delta * TRACKPAD_PAN_SENSITIVITY)
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseButton:
@@ -329,19 +461,23 @@ func thought_for(citizen: Simulation.Citizen) -> String:
 			var raw := citizen.cell + direction * distance
 			var cell := Vector2i(posmod(raw.x, GRID_SIZE), posmod(raw.y, GRID_SIZE))
 			best_sugar = maxf(best_sugar, simulation.sugar[cell.y * GRID_SIZE + cell.x])
+	var thought := "附近没有糖，继续寻找"
 	if citizen.wealth <= citizen.metabolism * 2:
-		return "我需要糖！"
-	if best_sugar > current_sugar + 0.1:
-		return "去找更肥的糖田"
-	if current_sugar > 0.1:
-		return "这里还有糖，先采集"
-	return "附近没有糖，继续寻找"
+		thought = "我需要糖！"
+	elif best_sugar > current_sugar + 0.1:
+		thought = "去找更肥的糖田"
+	elif current_sugar > 0.1:
+		thought = "这里还有糖，先采集"
+	return "居民 #%03d\n%s" % [citizen.id, thought]
 
 
 func select_at(global_point: Vector2) -> void:
 	var point := map_layer.to_local(global_point)
 	if not Rect2(MAP_ORIGIN, Vector2.ONE * MAP_SIZE).has_point(point):
 		return
+	if manual_controlled and selected_citizen != null:
+		simulation.set_manual_control(selected_citizen.id, false)
+	manual_controlled = false
 	selected_citizen = null
 	following_selected = false
 	var nearest := 10.0
@@ -354,6 +490,7 @@ func select_at(global_point: Vector2) -> void:
 	selected_cell = Vector2i((point - MAP_ORIGIN) / TILE_SIZE)
 	if selected_citizen != null:
 		selected_cell = selected_citizen.cell
+	fog_enabled = selected_citizen != null
 	for citizen in simulation.citizens:
 		var resident: Resident = residents[citizen.id]
 		resident.selected = selected_citizen != null and resident.citizen_id == selected_citizen.id
@@ -361,15 +498,16 @@ func select_at(global_point: Vector2) -> void:
 		resident.queue_redraw()
 	update_panel()
 	update_map_layer()
+	update_fog_layer()
 
 
 func update_panel() -> void:
 	var stats := simulation.get_stats()
 	status.text = "糖域纪年 %03d 年  /  %s" % [simulation.tick, "运行中" if running else "已暂停"]
 	update_recording_status()
-	economy.text = "人口 %d · 累计补入 %d\n总财富 %.1f · 人均 %.1f\n财富基尼 %.3f · 地图存糖 %.1f\n本轮采集 %.1f · 代谢 %.1f\n累计死亡：饥饿 %d / 寿终 %d" % [
+	economy.text = "人口 %d · 累计补入 %d\n总财富 %.1f · 人均 %.1f\n财富基尼 %.3f · 地图存糖 %.1f\n本轮采集 %.1f · 代谢 %.1f\n死亡释放 %.1f · 累计死亡：饥饿 %d / 寿终 %d" % [
 		stats.population, simulation.replacements, stats.total_wealth, stats.mean_wealth,
-		stats.gini, stats.land_sugar, stats.harvested, stats.consumed,
+		stats.gini, stats.land_sugar, stats.harvested, stats.consumed, stats.released_wealth,
 		simulation.starved, simulation.aged_out,
 	]
 	if selected_cell.x < 0:
@@ -387,8 +525,9 @@ func update_panel() -> void:
 			selected_citizen.id, reason, selected_citizen.age, selected_citizen.wealth,
 		]
 	else:
-		selection.text = "居民 #%03d\n%s\n财富 %.2f · 本轮采集 %.2f\n代谢 %d / 轮 · 视野 %d 格\n年龄 %d / %d 轮" % [
-			selected_citizen.id, cell_info, selected_citizen.wealth, selected_citizen.last_harvest,
+		var control_text := "用户接管中 · 方向键移动" if manual_controlled else "自动行动 · 按 E 接管"
+		selection.text = "居民 #%03d · %s\n%s\n财富 %.2f · 本轮采集 %.2f\n代谢 %d / 轮 · 视野 %d 格\n年龄 %d / %d 轮" % [
+			selected_citizen.id, control_text, cell_info, selected_citizen.wealth, selected_citizen.last_harvest,
 			selected_citizen.metabolism, selected_citizen.vision, selected_citizen.age, selected_citizen.max_age,
 		]
 

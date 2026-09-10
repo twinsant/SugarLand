@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://world.gd" id="1"]
 [ext_resource type="Script" path="res://map_layer.gd" id="2"]
+[ext_resource type="Script" path="res://fog_layer.gd" id="3"]
 
 [node name="SugarLand" type="Control"]
 layout_mode = 3
@@ -41,6 +42,9 @@ clip_contents = true
 script = ExtResource("2")
 
 [node name="Residents" type="Node2D" parent="MapClip/MapLayer"]
+
+[node name="FogLayer" type="Node2D" parent="MapClip/MapLayer"]
+script = ExtResource("3")
 
 [node name="Sidebar" type="VBoxContainer" parent="."]
 offset_left = 768.0
@@ -141,4 +145,4 @@ offset_top = 800.0
 offset_right = 1120.0
 offset_bottom = 832.0
 theme_override_colors/font_color = Color(0.5, 0.64, 0.68, 1)
-text = "左键选择   /   滚轮或触控板缩放   /   双指平移   /   0复位视图   /   V录像"
+text = "左键选择   /   E接管   /   方向键移动   /   F迷雾   /   滚轮或触控板缩放   /   V录像"

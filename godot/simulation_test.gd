@@ -98,7 +98,7 @@ func _test_initialization() -> void:
 	var stats: Dictionary = model.get_stats()
 	for key in ["population", "total_wealth", "mean_wealth", "gini", "land_sugar", "harvested", "consumed"]:
 		_check(stats.has(key), "统计字段 " + key)
-	for key in ["harvested", "consumed", "growth", "injected_wealth", "removed_wealth"]:
+	for key in ["harvested", "consumed", "growth", "injected_wealth", "removed_wealth", "released_wealth"]:
 		_near(stats[key], 0.0, "初始预算 " + key)
 
 
@@ -219,6 +219,7 @@ func _test_deaths_and_replacements() -> void:
 	aging.max_age = 60
 	negative.wealth = 0.5
 	negative.metabolism = 4
+	_resource(model, aging.cell, 4.0, 0.0)
 	_step_with_budget(model)
 	_check(starving.death_reason == "starvation" and starving.age == 60, "零财富且到寿命时饥饿优先")
 	_check(aging.death_reason == "age" and aging.age == 60, "达到寿命即老死")
@@ -226,7 +227,8 @@ func _test_deaths_and_replacements() -> void:
 	_near(negative.wealth, -3.5, "死者保留真实负财富用于预算")
 	_check(model.starved == 2 and model.aged_out == 1 and model.replacements == 80, "累计死亡及补入统计")
 	_check(not model.citizens.has(starving) and not model.citizens.has(aging) and not model.citizens.has(negative), "移除所有死者但外部引用可报告原因")
-	_near(model.get_stats().removed_wealth, 15.5, "移除财富包含负数")
+	_near(model.get_stats().removed_wealth, 16.5, "移除财富包含负数")
+	_near(model.get_stats().released_wealth, 4.0, "寿终居民正财富释放到地块")
 	_near(model.get_stats().consumed, 6.0, "仅旧居民代谢")
 	for citizen in model.citizens:
 		_check(citizen.id >= 81, "补入 ID 不重用")
@@ -329,11 +331,14 @@ func _step_with_budget(model) -> void:
 	var after: Dictionary = model.get_stats()
 	var injected := 0.0
 	var removed := 0.0
+	var released := 0.0
 	var harvested := 0.0
 	for citizen in old_citizens:
 		harvested += citizen.last_harvest
 		if not model.citizens.has(citizen):
 			removed += citizen.wealth
+			if citizen.wealth > 0.0:
+				released += minf(citizen.wealth, model.capacities[citizen.cell.y * 50 + citizen.cell.x])
 	for citizen in model.citizens:
 		if not old_citizens.has(citizen):
 			injected += citizen.wealth
@@ -342,9 +347,10 @@ func _step_with_budget(model) -> void:
 	_near(after.harvested, harvested, "独立计算收割量")
 	_near(after.injected_wealth, injected, "独立计算新人财富注入")
 	_near(after.removed_wealth, removed, "独立计算死者财富移除")
-	_near(after.land_sugar - before.land_sugar, expected_growth - harvested, "土地预算", 0.001)
+	_near(after.released_wealth, released, "独立计算死亡财富释放")
+	_near(after.land_sugar - before.land_sugar, expected_growth - harvested + released, "土地预算", 0.001)
 	_near(after.total_wealth - before.total_wealth, harvested - expected_consumed + injected - removed, "居民预算", 0.001)
-	_near(after.land_sugar + after.total_wealth - before.land_sugar - before.total_wealth, expected_growth - expected_consumed + injected - removed, "总资源及财富守恒预算", 0.001)
+	_near(after.land_sugar + after.total_wealth - before.land_sugar - before.total_wealth, expected_growth - expected_consumed + injected - removed + released, "总资源及财富守恒预算", 0.001)
 
 
 func _test_long_run() -> void:

@@ -23,6 +23,9 @@ var starved: int = 0
 var aged_out: int = 0
 var replacements: int = 0
 var harvested_by_cell: Dictionary = {}
+var death_events: Array[Dictionary] = []
+var manual_controlled: Dictionary = {}
+var manual_commands: Dictionary = {}
 
 var _rng := RandomNumberGenerator.new()
 var _next_id: int = 1
@@ -31,6 +34,7 @@ var _consumed: float = 0.0
 var _growth: float = 0.0
 var _injected_wealth: float = 0.0
 var _removed_wealth: float = 0.0
+var _released_wealth: float = 0.0
 
 
 func reset(seed_value: int = 25) -> void:
@@ -41,6 +45,9 @@ func reset(seed_value: int = 25) -> void:
 	aged_out = 0
 	replacements = 0
 	harvested_by_cell.clear()
+	death_events.clear()
+	manual_controlled.clear()
+	manual_commands.clear()
 	_clear_budget()
 	citizens.clear()
 	capacities.resize(GRID_SIZE * GRID_SIZE)
@@ -58,6 +65,7 @@ func reset(seed_value: int = 25) -> void:
 func step() -> void:
 	_clear_budget()
 	harvested_by_cell.clear()
+	death_events.clear()
 	for index in sugar.size():
 		var before := sugar[index]
 		sugar[index] = minf(capacities[index], before + 1.0)
@@ -73,6 +81,9 @@ func step() -> void:
 		order[other] = temporary
 	for citizen in order:
 		var destination := _choose_cell(citizen, occupied)
+		if manual_controlled.has(citizen.id):
+			destination = _choose_manual_cell(citizen, occupied)
+		manual_commands.erase(citizen.id)
 		occupied.erase(citizen.cell)
 		citizen.cell = destination
 		occupied[destination] = true
@@ -88,9 +99,11 @@ func step() -> void:
 		if citizen.wealth <= 0.0:
 			citizen.death_reason = "starvation"
 			starved += 1
+			death_events.append({"cell": citizen.cell, "reason": citizen.death_reason})
 		elif citizen.age >= citizen.max_age:
 			citizen.death_reason = "age"
 			aged_out += 1
+			death_events.append({"cell": citizen.cell, "reason": citizen.death_reason})
 	var survivors: Array[Citizen] = []
 	for citizen in citizens:
 		if citizen.death_reason.is_empty():
@@ -98,6 +111,12 @@ func step() -> void:
 		else:
 			occupied.erase(citizen.cell)
 			_removed_wealth += citizen.wealth
+			if citizen.wealth > 0.0:
+				var death_index := _index(citizen.cell)
+				var available_capacity := capacities[death_index] - sugar[death_index]
+				var released := minf(citizen.wealth, maxf(available_capacity, 0.0))
+				sugar[death_index] += released
+				_released_wealth += released
 	citizens = survivors
 	while citizens.size() < POPULATION:
 		var newcomer := _spawn(occupied)
@@ -133,7 +152,30 @@ func get_stats() -> Dictionary:
 		"growth": _growth,
 		"injected_wealth": _injected_wealth,
 		"removed_wealth": _removed_wealth,
+		"released_wealth": _released_wealth,
 	}
+
+
+func set_manual_control(citizen_id: int, enabled: bool) -> void:
+	if enabled:
+		manual_controlled[citizen_id] = true
+	else:
+		manual_controlled.erase(citizen_id)
+		manual_commands.erase(citizen_id)
+
+
+func queue_manual_move(citizen_id: int, direction: Vector2i) -> void:
+	if manual_controlled.has(citizen_id):
+		manual_commands[citizen_id] = direction
+
+
+func _choose_manual_cell(citizen: Citizen, occupied: Dictionary) -> Vector2i:
+	var direction: Vector2i = manual_commands.get(citizen.id, Vector2i.ZERO)
+	if direction == Vector2i.ZERO:
+		return citizen.cell
+	var raw := citizen.cell + direction
+	var destination := Vector2i(posmod(raw.x, GRID_SIZE), posmod(raw.y, GRID_SIZE))
+	return citizen.cell if occupied.has(destination) else destination
 
 
 func _choose_cell(citizen: Citizen, occupied: Dictionary) -> Vector2i:
@@ -180,6 +222,7 @@ func _clear_budget() -> void:
 	_growth = 0.0
 	_injected_wealth = 0.0
 	_removed_wealth = 0.0
+	_released_wealth = 0.0
 
 
 func _index(cell: Vector2i) -> int:
