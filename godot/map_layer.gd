@@ -5,6 +5,9 @@ var tile_size := 14.0
 var map_origin := Vector2(32, 10)
 var display_sugar := PackedFloat32Array()
 var selected_cell := Vector2i(-1, -1)
+var tutorial_action := "none"
+var tutorial_resident_pos := Vector2.ZERO
+const TUTORIAL_COLOR := Color("ffd23f")
 
 
 func _draw() -> void:
@@ -19,3 +22,5 @@ func _draw() -> void:
 			draw_rect(Rect2(map_origin + Vector2(x, y) * tile_size, Vector2.ONE * (tile_size - 0.7)), color)
 	if selected_cell.x >= 0:
 		draw_rect(Rect2(map_origin + Vector2(selected_cell) * tile_size, Vector2.ONE * tile_size), Color("fff6dc"), false, 2.0)
+	if tutorial_action == "frame_map":
+		draw_rect(Rect2(map_origin - Vector2.ONE * 4, Vector2.ONE * (map_size + 8)), TUTORIAL_COLOR, false, 3.0)

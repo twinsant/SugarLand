@@ -1,19 +1,18 @@
 {
   "pages": [
-    {"title": "欢迎来到糖域", "text": "我是这里的居民。"},
-    {"title": "环面世界", "text": "这是一张 50×50 的环面地图。"},
-    {"title": "糖是命脉", "text": "我们在土地上寻找糖来维生。"},
-    {"title": "糖会再生", "text": "糖被采集后会慢慢长回来。"},
-    {"title": "地形颜色", "text": "绿色糖多，沙漠黄糖少。"},
-    {"title": "居民属性", "text": "我有视野、代谢和寿命。"},
-    {"title": "财富配色", "text": "越富有，衣服越接近金色。"},
-    {"title": "饥饿死亡", "text": "财富不足会饿死。"},
-    {"title": "点击查看", "text": "点我可以看状态和想法。"},
-    {"title": "视野圆圈", "text": "海蓝圆圈是我的视野范围。"},
-    {"title": "视野迷雾", "text": "按 F 开启迷雾，视野外变黑。"},
-    {"title": "地图缩放", "text": "滚轮和触控板可缩放平移。"},
-    {"title": "用户接管", "text": "按 E 接管我，方向键移动。"},
-    {"title": "死亡交替", "text": "我死后，最富和最穷者交替登场。"},
-    {"title": "准备好了", "text": "进入糖域，开始仿真！"}
+    {"title": "欢迎来到糖域", "text": "我就是这里的居民。", "action": "frame_resident"},
+    {"title": "环面世界", "text": "这是一张 50×50 的环面地图。", "action": "frame_map"},
+    {"title": "糖是命脉", "text": "我们在土地上寻找糖来维生。", "action": "select_rich_tile"},
+    {"title": "糖会再生", "text": "糖被采集后会慢慢长回来。", "action": "select_poor_tile"},
+    {"title": "地形颜色", "text": "绿色糖多，沙漠黄糖少。", "action": "frame_map"},
+    {"title": "居民属性", "text": "我有视野、代谢和寿命。", "action": "frame_resident"},
+    {"title": "财富配色", "text": "越富有，衣服越接近金色。", "action": "frame_resident"},
+    {"title": "点击查看", "text": "点我可以看状态和想法。", "action": "frame_resident"},
+    {"title": "视野圆圈", "text": "海蓝圆圈是我的视野范围。", "action": "show_vision"},
+    {"title": "视野迷雾", "text": "按 F 开启迷雾，视野外变黑。", "action": "show_fog"},
+    {"title": "地图缩放", "text": "滚轮和触控板可缩放平移。", "action": "zoom_demo"},
+    {"title": "用户接管", "text": "按 E 接管我，方向键移动。", "action": "frame_resident"},
+    {"title": "死亡交替", "text": "我死后，最富和最穷者交替登场。", "action": "frame_resident"},
+    {"title": "准备好了", "text": "进入糖域，开始仿真！", "action": "none"}
   ]
 }

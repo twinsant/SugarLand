@@ -48,10 +48,22 @@ func run() -> void:
 		if resident.visible:
 			visible_residents += 1
 	check(visible_residents == 1, "World tutorial must show exactly one real resident")
-	check(guide.get_parent() == scene.residents[scene.simulation.citizens[0].id] and guide.bubble.text.contains("欢迎") and guide.next_button.visible, "World tutorial must attach its bubble to the real guide resident")
-	var intro_text: String = guide.bubble.text
+	var guide_res = scene.residents[scene.simulation.citizens[0].id]
+	var bubble_root = guide_res.get_node("ThoughtBubbleRoot")
+	var title_label: Label = bubble_root.get_node("BubbleTitle")
+	var body_label: Label = bubble_root.get_node("ThoughtBubble")
+	check(guide.get_parent() == guide_res and title_label.text.contains("欢迎") and guide.next_button.visible, "World tutorial must attach its bubble to the real guide resident")
+	var intro_text: String = body_label.text
+	check(scene.tutorial_action == "frame_resident", "First tutorial page must select the resident")
+	check(guide_res.selected, "frame_resident action must select the guide resident")
 	click(guide.next_button.get_global_rect().get_center())
-	check(guide.bubble.text != intro_text, "World tutorial next button must advance JSON pages")
+	check(body_label.text != intro_text, "World tutorial next button must advance JSON pages")
+	check(scene.tutorial_action == "frame_map", "Second tutorial page must frame the map")
+	# Advance to a tile-selection page
+	while scene.tutorial_action != "select_rich_tile" and scene.tutorial_guide != null:
+		click(guide.next_button.get_global_rect().get_center())
+		await process_frame
+	check(scene.selected_cell.x >= 0, "Tile selection action must select a cell")
 	scene.finish_tutorial()
 	check(not scene.tutorial_mode and scene.running, "Finishing tutorial must start the current game logic")
 	var pause: Button = scene.get_node("%Pause")
@@ -76,7 +88,7 @@ func run() -> void:
 	click(first_view.get_global_position())
 	check(selection.text.contains("居民 #001"), "Resident click must show its identity")
 	check(selection.text.contains("财富") and selection.text.contains("代谢"), "Resident details must show economic attributes")
-	check(first_view.get_node("ThoughtBubble").visible and first_view.get_node("ThoughtBubble").text.contains("#001") and first_view.get_node("ThoughtBubble").text.contains("糖"), "Selected resident bubble must show its identity and thought")
+	check(first_view.get_node("ThoughtBubbleRoot/ThoughtBubble").visible and first_view.get_node("ThoughtBubbleRoot/ThoughtBubble").text.contains("#001") and first_view.get_node("ThoughtBubbleRoot/ThoughtBubble").text.contains("糖"), "Selected resident bubble must show its identity and thought")
 	check(scene.fog_enabled and scene.fog_layer.visible, "Selecting a resident must automatically show fog")
 	key(KEY_F)
 	check(not scene.fog_enabled and not scene.fog_layer.visible, "F must hide the selected resident's fog")
@@ -111,6 +123,9 @@ func run() -> void:
 	check(scene.selected_citizen == richest, "Selected resident death must choose the richest resident first")
 	check(scene.get_node("MapClip/MapLayer/Residents").get_child_count() == 80, "Death replacement must preserve 80 visible residents")
 	check(scene.death_markers.size() > 0, "Death must create a skull marker")
+	await process_frame
+	var fixed_msg: Label = scene.get_node("%SelectedDeathMessage")
+	check(fixed_msg.text.contains("寿终") and fixed_msg.text.contains("年龄") and fixed_msg.text.contains("财富"), "Selected resident death must show a fixed message with reason, age and wealth")
 	richest.max_age = richest.age + 1
 	key(KEY_N)
 	var poorest = scene.simulation.citizens[0]

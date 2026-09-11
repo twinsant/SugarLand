@@ -40,6 +40,8 @@ var manual_controlled := false
 var game_started := false
 var tutorial_mode := false
 var tutorial_guide: TutorialGuide
+var tutorial_action := "none"
+var tutorial_show_vision := false
 var next_death_select_richest := true
 
 @onready var map_clip: Control = $MapClip
@@ -53,6 +55,16 @@ var next_death_select_richest := true
 @onready var record_button: Button = %Record
 @onready var recording_status: Label = %RecordingStatus
 @onready var zoom_status: Label = %ZoomStatus
+@onready var message_feed: Control = %SystemMessageFeed
+@onready var selected_death_message: Label = %SelectedDeathMessage
+
+
+const MESSAGE_LIFETIME := 8.0
+const MESSAGE_FADE_TIME := 2.0
+const MESSAGE_HEIGHT := 28.0
+const MESSAGE_MAX := 5
+var message_entries: Array[Dictionary] = []
+var selected_death_timer := 0.0
 
 
 func _ready() -> void:
@@ -108,8 +120,53 @@ func start_tutorial() -> void:
 	guide_resident.set_bubble_viewport(map_clip.get_global_rect())
 	tutorial_guide = TutorialGuide.new()
 	tutorial_guide.finished.connect(finish_tutorial)
+	tutorial_guide.action_changed.connect(set_tutorial_action)
 	guide_resident.add_child(tutorial_guide)
 	tutorial_guide.position = Vector2.ZERO
+
+
+func set_tutorial_action(action: String) -> void:
+	tutorial_action = action
+	tutorial_show_vision = false
+	fog_enabled = false
+	selected_citizen = null
+	selected_cell = Vector2i(-1, -1)
+	var guide_resident: Resident = residents.get(simulation.citizens[0].id)
+	if guide_resident != null:
+		guide_resident.tutorial_show_vision = false
+		guide_resident.selected = false
+		guide_resident.queue_redraw()
+	match action:
+		"frame_resident":
+			if guide_resident != null:
+				select_at(map_layer.to_global(guide_resident.position))
+		"select_rich_tile":
+			select_at(map_layer.to_global(cell_center(find_extreme_tile(true))))
+		"select_poor_tile":
+			select_at(map_layer.to_global(cell_center(find_extreme_tile(false))))
+		"show_vision":
+			tutorial_show_vision = true
+			if guide_resident != null:
+				guide_resident.tutorial_show_vision = true
+				guide_resident.queue_redraw()
+		"show_fog":
+			fog_enabled = true
+			update_fog_layer()
+		"zoom_demo":
+			zoom_at(map_clip.get_global_rect().get_center(), 1.6)
+	update_map_layer()
+
+
+func find_extreme_tile(rich: bool) -> Vector2i:
+	var best := simulation.sugar[0]
+	var best_cell := Vector2i(0, 0)
+	for y in GRID_SIZE:
+		for x in GRID_SIZE:
+			var s := simulation.sugar[y * GRID_SIZE + x]
+			if (rich and s > best) or (not rich and s < best):
+				best = s
+				best_cell = Vector2i(x, y)
+	return best_cell
 
 
 func finish_tutorial() -> void:
@@ -117,6 +174,9 @@ func finish_tutorial() -> void:
 		tutorial_guide.queue_free()
 	tutorial_guide = null
 	tutorial_mode = false
+	tutorial_action = "none"
+	tutorial_show_vision = false
+	fog_enabled = false
 	game_started = true
 	reset()
 
@@ -131,6 +191,7 @@ func _process(delta: float) -> void:
 			advance()
 	update_selected_follow(delta)
 	update_fog_layer()
+	update_system_message(delta)
 	if recording:
 		recording_elapsed += delta
 		while recording_elapsed >= 1.0 / RECORDING_FPS:
@@ -146,6 +207,7 @@ func advance() -> void:
 		select_extreme_citizen(next_death_select_richest)
 		next_death_select_richest = not next_death_select_richest
 	spawn_death_markers()
+	show_death_messages(selected_before if selected_died else null)
 	display_sugar = simulation.sugar.duplicate()
 	for index in simulation.harvested_by_cell:
 		display_sugar[index] = simulation.harvested_by_cell[index]
@@ -174,6 +236,82 @@ func spawn_death_markers() -> void:
 		marker.position = cell_center(death["cell"])
 		map_layer.add_child(marker)
 		death_markers.append(marker)
+
+
+func show_death_messages(selected_dead: Simulation.Citizen = null) -> void:
+	if simulation.death_events.is_empty():
+		return
+	var selected_id := selected_dead.id if selected_dead != null else -1
+	for death in simulation.death_events:
+		var reason_text := "饥饿" if death["reason"] == "starvation" else "寿终"
+		var text := "居民 #%03d %s · 年龄 %d · 财富 %.1f" % [death["id"], reason_text, death["age"], death["wealth"]]
+		if death["id"] == selected_id:
+			var color := Color(0.55, 0.85, 0.55, 1) if death["reason"] == "age" else Color(0.95, 0.84, 0.55, 1)
+			selected_death_message.text = text
+			selected_death_message.add_theme_color_override("font_color", color)
+			selected_death_message.modulate.a = 1.0
+			selected_death_timer = MESSAGE_LIFETIME
+		else:
+			var color := Color(0.55, 0.85, 0.55, 1) if death["reason"] == "age" else Color(0.95, 0.84, 0.55, 1)
+			add_message(text, color)
+
+
+func add_message(text: String, color: Color = Color(0.95, 0.84, 0.55, 1)) -> void:
+	var label := Label.new()
+	label.text = text
+	label.add_theme_color_override("font_color", color)
+	label.add_theme_font_size_override("font_size", 14)
+	label.position = Vector2(0, message_feed.size.y - MESSAGE_HEIGHT)
+	label.size = Vector2(message_feed.size.x, MESSAGE_HEIGHT)
+	message_feed.add_child(label)
+	message_entries.append({"label": label, "age": 0.0})
+	while message_entries.size() > MESSAGE_MAX:
+		var old: Dictionary = message_entries[0]
+		var old_label: Label = old["label"]
+		if is_instance_valid(old_label):
+			old_label.queue_free()
+		message_entries.pop_front()
+	layout_messages(0.0)
+
+
+func layout_messages(delta: float) -> void:
+	var count := message_entries.size()
+	for i in count:
+		var entry: Dictionary = message_entries[i]
+		var label: Label = entry["label"]
+		if not is_instance_valid(label):
+			continue
+		entry["age"] = float(entry["age"]) + delta
+		var target_y: float = message_feed.size.y - (count - i) * MESSAGE_HEIGHT
+		label.position.y = lerpf(label.position.y, target_y, 0.15)
+		var age: float = entry["age"]
+		var alpha: float = 1.0
+		if age > MESSAGE_LIFETIME - MESSAGE_FADE_TIME:
+			alpha = clampf((MESSAGE_LIFETIME - age) / MESSAGE_FADE_TIME, 0.0, 1.0)
+		label.modulate.a = alpha
+	# Remove fully faded messages
+	var i := 0
+	while i < message_entries.size():
+		var entry: Dictionary = message_entries[i]
+		if float(entry["age"]) >= MESSAGE_LIFETIME:
+			var dead_label: Label = entry["label"]
+			if is_instance_valid(dead_label):
+				dead_label.queue_free()
+			message_entries.pop_at(i)
+		else:
+			i += 1
+
+
+func update_system_message(delta: float) -> void:
+	layout_messages(delta)
+	if selected_death_timer > 0.0:
+		selected_death_timer -= delta
+		if selected_death_timer <= 0.0:
+			selected_death_timer = 0.0
+			selected_death_message.text = ""
+		else:
+			var alpha: float = clampf(selected_death_timer / MESSAGE_FADE_TIME, 0.0, 1.0)
+			selected_death_message.modulate.a = alpha
 
 
 func sync_residents(animate: bool) -> void:
@@ -217,11 +355,21 @@ func _on_harvest_ready(cell: Vector2i) -> void:
 func update_map_layer() -> void:
 	map_layer.set("display_sugar", display_sugar)
 	map_layer.set("selected_cell", selected_cell)
+	map_layer.set("tutorial_action", tutorial_action)
 	map_layer.queue_redraw()
 
 
 func update_fog_layer() -> void:
-	if not fog_enabled or selected_citizen == null or not residents.has(selected_citizen.id):
+	if not fog_enabled:
+		fog_layer.set_fog(false, Vector2.ZERO, 0.0, 0.0)
+		return
+	if tutorial_mode and not simulation.citizens.is_empty():
+		var guide_resident: Resident = residents.get(simulation.citizens[0].id)
+		if guide_resident != null:
+			var radius := (guide_resident.vision + 0.5) * TILE_SIZE
+			fog_layer.set_fog(true, guide_resident.position, radius, TILE_SIZE * 3.0)
+			return
+	if selected_citizen == null or not residents.has(selected_citizen.id):
 		fog_layer.set_fog(false, Vector2.ZERO, 0.0, 0.0)
 		return
 	var resident: Resident = residents[selected_citizen.id]
@@ -494,7 +642,8 @@ func select_at(global_point: Vector2) -> void:
 	for citizen in simulation.citizens:
 		var resident: Resident = residents[citizen.id]
 		resident.selected = selected_citizen != null and resident.citizen_id == selected_citizen.id
-		resident.set_thought(thought_for(citizen) if resident.selected else "")
+		if not tutorial_mode:
+			resident.set_thought(thought_for(citizen) if resident.selected else "")
 		resident.queue_redraw()
 	update_panel()
 	update_map_layer()

@@ -146,3 +146,22 @@ offset_right = 1120.0
 offset_bottom = 832.0
 theme_override_colors/font_color = Color(0.5, 0.64, 0.68, 1)
 text = "左键选择   /   E接管   /   方向键移动   /   F迷雾   /   滚轮或触控板缩放   /   V录像"
+
+[node name="SystemMessageFeed" type="Control" parent="."]
+unique_name_in_owner = true
+offset_left = 36.0
+offset_top = 560.0
+offset_right = 560.0
+offset_bottom = 700.0
+mouse_filter = 2
+
+[node name="SelectedDeathMessage" type="Label" parent="."]
+unique_name_in_owner = true
+offset_left = 420.0
+offset_top = 676.0
+offset_right = 740.0
+offset_bottom = 704.0
+theme_override_colors/font_color = Color(0.95, 0.84, 0.55, 1)
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 2
+text = ""

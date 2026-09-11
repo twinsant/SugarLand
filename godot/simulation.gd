@@ -99,11 +99,11 @@ func step() -> void:
 		if citizen.wealth <= 0.0:
 			citizen.death_reason = "starvation"
 			starved += 1
-			death_events.append({"cell": citizen.cell, "reason": citizen.death_reason})
+			death_events.append({"id": citizen.id, "cell": citizen.cell, "reason": citizen.death_reason, "age": citizen.age, "wealth": citizen.wealth})
 		elif citizen.age >= citizen.max_age:
 			citizen.death_reason = "age"
 			aged_out += 1
-			death_events.append({"cell": citizen.cell, "reason": citizen.death_reason})
+			death_events.append({"id": citizen.id, "cell": citizen.cell, "reason": citizen.death_reason, "age": citizen.age, "wealth": citizen.wealth})
 	var survivors: Array[Citizen] = []
 	for citizen in citizens:
 		if citizen.death_reason.is_empty():
