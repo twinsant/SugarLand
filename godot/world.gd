@@ -17,7 +17,6 @@ const FOLLOW_MARGIN_CELLS := 2.0
 const FOLLOW_SMOOTHNESS := 8.0
 const STEP_SECONDS := 0.9
 const RECORDING_FPS := 30.0
-const RECORDING_DIR := "user://recordings"
 
 var simulation := Simulation.new()
 var display_sugar := PackedFloat32Array()
@@ -31,7 +30,11 @@ var recording := false
 var recording_elapsed := 0.0
 var recording_frame := 0
 var recording_path := ""
+var recording_mp4_path := ""
 var recording_result := ""
+var recording_thread: Thread
+var recording_pending: Image
+var recording_saving := false
 var panning := false
 var following_selected := false
 var map_pan_target := Vector2.ZERO
@@ -179,24 +182,6 @@ func finish_tutorial() -> void:
 	fog_enabled = false
 	game_started = true
 	reset()
-
-
-func _process(delta: float) -> void:
-	if not game_started:
-		return
-	if running:
-		elapsed += delta
-		if elapsed >= STEP_SECONDS:
-			elapsed = fmod(elapsed, STEP_SECONDS)
-			advance()
-	update_selected_follow(delta)
-	update_fog_layer()
-	update_system_message(delta)
-	if recording:
-		recording_elapsed += delta
-		while recording_elapsed >= 1.0 / RECORDING_FPS:
-			recording_elapsed -= 1.0 / RECORDING_FPS
-			capture_frame()
 
 
 func advance() -> void:
@@ -444,8 +429,13 @@ func toggle_recording() -> void:
 	recording = not recording
 	if recording:
 		var session_name := "session_%d" % Time.get_ticks_msec()
-		recording_path = "%s/%s" % [RECORDING_DIR, session_name]
-		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(recording_path))
+		var home := OS.get_environment("HOME")
+		var mp4_dir := "%s/.sugarland/recordings/%s" % [home, session_name]
+		var png_dir := "/tmp/sugarland/%s" % session_name
+		DirAccess.make_dir_recursive_absolute(mp4_dir)
+		DirAccess.make_dir_recursive_absolute(png_dir)
+		recording_path = png_dir
+		recording_mp4_path = mp4_dir + "/sugarland.mp4"
 		recording_elapsed = 0.0
 		recording_frame = 0
 		recording_result = ""
@@ -458,12 +448,17 @@ func toggle_recording() -> void:
 
 
 func finish_recording() -> void:
+	if recording_saving and recording_thread != null:
+		recording_thread.wait_to_finish()
+		recording_thread = null
+		recording_saving = false
+		recording_frame += 1
 	if recording_frame == 0:
 		recording_result = "录像结束：没有可用帧"
 		return
 	var ffmpeg_path := find_ffmpeg()
-	var input_pattern := ProjectSettings.globalize_path(recording_path) + "/frame_" + "%06d" + ".png"
-	var output_path := ProjectSettings.globalize_path(recording_path + "/sugarland.mp4")
+	var input_pattern := recording_path + "/frame_" + "%06d" + ".png"
+	var output_path := recording_mp4_path
 	var arguments := PackedStringArray([
 		"-y", "-framerate", str(RECORDING_FPS), "-i", input_pattern,
 		"-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
@@ -472,9 +467,9 @@ func finish_recording() -> void:
 	var output: Array[String] = []
 	var exit_code := OS.execute(ffmpeg_path, arguments, output, true)
 	if exit_code == 0:
-		recording_result = "录像完成：%d 帧\n%s" % [recording_frame, recording_path + "/sugarland.mp4"]
+		recording_result = "录像完成：%d 帧" % recording_frame
 	else:
-		recording_result = "转码失败（%d），PNG 已保留\n%s" % [exit_code, recording_path]
+		recording_result = "转码失败（%d），PNG 已保留" % exit_code
 
 
 func find_ffmpeg() -> String:
@@ -487,6 +482,8 @@ func find_ffmpeg() -> String:
 func capture_frame() -> void:
 	if not recording or DisplayServer.get_name() == "headless":
 		return
+	if recording_saving:
+		return
 	var viewport_texture := get_viewport().get_texture()
 	if viewport_texture == null:
 		update_recording_status()
@@ -495,15 +492,46 @@ func capture_frame() -> void:
 	if image == null:
 		update_recording_status()
 		return
-	var frame_path := "%s/frame_%06d.png" % [recording_path, recording_frame]
-	if image.save_png(frame_path) == OK:
-		recording_frame += 1
-	update_recording_status()
+	recording_pending = image
+	recording_saving = true
+	recording_thread = Thread.new()
+	var frame_index := recording_frame
+	recording_thread.start(_save_frame.bind(frame_index))
+
+
+func _save_frame(frame_index: int) -> void:
+	var frame_path := "%s/frame_%06d.png" % [recording_path, frame_index]
+	recording_pending.save_png(frame_path)
+
+
+func _process(delta: float) -> void:
+	if not game_started:
+		return
+	if recording and recording_saving and recording_thread != null:
+		if not recording_thread.is_alive():
+			recording_thread.wait_to_finish()
+			recording_thread = null
+			recording_saving = false
+			recording_frame += 1
+			update_recording_status()
+	if running:
+		elapsed += delta
+		if elapsed >= STEP_SECONDS:
+			elapsed = fmod(elapsed, STEP_SECONDS)
+			advance()
+	update_selected_follow(delta)
+	update_fog_layer()
+	update_system_message(delta)
+	if recording:
+		recording_elapsed += delta
+		while recording_elapsed >= 1.0 / RECORDING_FPS:
+			recording_elapsed -= 1.0 / RECORDING_FPS
+			capture_frame()
 
 
 func update_recording_status() -> void:
 	if recording:
-		recording_status.text = "录像中 · %d 帧\n%s" % [recording_frame, recording_path]
+		recording_status.text = "录像中 · %d 帧" % recording_frame
 	elif not recording_result.is_empty():
 		recording_status.text = recording_result
 	else:
