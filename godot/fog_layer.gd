@@ -8,6 +8,7 @@ var _fog_material: ShaderMaterial
 
 
 func _ready() -> void:
+	z_index = 1
 	_fog_rect = ColorRect.new()
 	_fog_rect.position = Vector2.ONE * FOG_ORIGIN
 	_fog_rect.size = Vector2.ONE * FOG_SIZE

@@ -2,6 +2,12 @@ extends Node2D
 
 const ThoughtBubble = preload("res://thought_bubble.gd")
 
+const GENERATION_COLORS := [
+	Color("e67e22"), Color("f1c40f"), Color("2ecc71"),
+	Color("1abc9c"), Color("3498db"), Color("9b59b6"), Color("a188a6"),
+	Color("607d8b"), Color("795548"), Color("00bcd4"),
+]
+
 signal harvest_ready(cell: Vector2i)
 
 var citizen_id: int
@@ -10,6 +16,7 @@ var tint: Color
 var selected := false
 var vision := 1
 var tile_size := 14.0
+var generation := 0
 var start := Vector2.ZERO
 var target := Vector2.ZERO
 var travel := 1.0
@@ -109,4 +116,5 @@ func _draw() -> void:
 	draw_line(Vector2(-1.5, 0), Vector2(-2.5 - stride, 4), Color("152a31"), 2.0, true)
 	draw_line(Vector2(1.5, 0), Vector2(2.5 + stride, 4), Color("152a31"), 2.0, true)
 	draw_circle(Vector2(0, -1.5 - absf(stride) * 0.35), 3.5, tint)
-	draw_circle(Vector2(0, -5.0 - absf(stride) * 0.35), 2.5, Color("ffe2b8"))
+	var head_color: Color = GENERATION_COLORS[generation % GENERATION_COLORS.size()]
+	draw_circle(Vector2(0, -5.0 - absf(stride) * 0.35), 2.5, head_color)

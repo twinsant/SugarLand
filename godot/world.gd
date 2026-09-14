@@ -3,7 +3,9 @@ extends Control
 const Simulation = preload("res://simulation.gd")
 const Resident = preload("res://resident.gd")
 const DeathMarker = preload("res://death_marker.gd")
+const HeartMarker = preload("res://heart_marker.gd")
 const TutorialGuide = preload("res://tutorial_guide.gd")
+const SettingsPanel = preload("res://settings_panel.gd")
 const GRID_SIZE := Simulation.GRID_SIZE
 const TILE_SIZE := 14.0
 const MAP_ORIGIN := Vector2(32, 10)
@@ -15,13 +17,14 @@ const ZOOM_STEP := 1.15
 const TRACKPAD_PAN_SENSITIVITY := 32.0
 const FOLLOW_MARGIN_CELLS := 2.0
 const FOLLOW_SMOOTHNESS := 8.0
-const STEP_SECONDS := 0.9
 const RECORDING_FPS := 30.0
+var step_seconds := 0.9
 
 var simulation := Simulation.new()
 var display_sugar := PackedFloat32Array()
 var residents: Dictionary = {}
 var death_markers: Array[DeathMarker] = []
+var heart_markers: Array[HeartMarker] = []
 var selected_citizen: Simulation.Citizen
 var selected_cell := Vector2i(-1, -1)
 var running := true
@@ -46,6 +49,7 @@ var tutorial_guide: TutorialGuide
 var tutorial_action := "none"
 var tutorial_show_vision := false
 var next_death_select_richest := true
+var settings_panel: SettingsPanel
 
 @onready var map_clip: Control = $MapClip
 @onready var map_layer: Node2D = $MapClip/MapLayer
@@ -53,12 +57,15 @@ var next_death_select_richest := true
 @onready var fog_layer: Node2D = $MapClip/MapLayer/FogLayer
 @onready var status: Label = %Status
 @onready var economy: Label = %Economy
-@onready var selection: Label = %Selection
+@onready var selection: RichTextLabel = %Selection
 @onready var pause_button: Button = %Pause
 @onready var record_button: Button = %Record
+@onready var settings_button: Button = %Settings
 @onready var recording_status: Label = %RecordingStatus
 @onready var zoom_status: Label = %ZoomStatus
 @onready var message_feed: Control = %SystemMessageFeed
+@onready var generation_palette = $GenerationPalette
+var _feed_bg: ColorRect
 @onready var selected_death_message: Label = %SelectedDeathMessage
 
 
@@ -66,6 +73,7 @@ const MESSAGE_LIFETIME := 8.0
 const MESSAGE_FADE_TIME := 2.0
 const MESSAGE_HEIGHT := 28.0
 const MESSAGE_MAX := 5
+const MESSAGE_PADDING := 5.0
 var message_entries: Array[Dictionary] = []
 var selected_death_timer := 0.0
 
@@ -76,10 +84,18 @@ func _ready() -> void:
 	theme = Theme.new()
 	theme.default_font = font
 	theme.default_font_size = 16
+	var feed_bg := ColorRect.new()
+	feed_bg.color = Color(0.0, 0.0, 0.0, 0.45)
+	feed_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	message_feed.add_child(feed_bg)
+	message_feed.move_child(feed_bg, 0)
+	_feed_bg = feed_bg
 	pause_button.pressed.connect(toggle_pause)
 	%Reset.pressed.connect(reset)
 	%Step.pressed.connect(single_step)
 	record_button.pressed.connect(toggle_recording)
+	settings_button.pressed.connect(open_settings)
+	generation_palette.swatch_clicked.connect(_on_swatch_clicked)
 	reset()
 	start_tutorial()
 
@@ -100,6 +116,10 @@ func reset() -> void:
 		if is_instance_valid(marker):
 			marker.free()
 	death_markers.clear()
+	for marker: HeartMarker in heart_markers:
+		if is_instance_valid(marker):
+			marker.free()
+	heart_markers.clear()
 	simulation.reset()
 	display_sugar = simulation.sugar.duplicate()
 	elapsed = 0.0
@@ -197,6 +217,7 @@ func advance() -> void:
 	for index in simulation.harvested_by_cell:
 		display_sugar[index] = simulation.harvested_by_cell[index]
 	sync_residents(running)
+	spawn_heart_markers()
 	if selected_citizen != null:
 		selected_cell = selected_citizen.cell
 	update_panel()
@@ -223,13 +244,23 @@ func spawn_death_markers() -> void:
 		death_markers.append(marker)
 
 
+func spawn_heart_markers() -> void:
+	for event in simulation.breeding_events:
+		var marker: HeartMarker = HeartMarker.new()
+		marker.parent_a = residents.get(event["parent_a"])
+		marker.parent_b = residents.get(event["parent_b"])
+		map_layer.add_child(marker)
+		heart_markers.append(marker)
+
+
 func show_death_messages(selected_dead: Simulation.Citizen = null) -> void:
 	if simulation.death_events.is_empty():
 		return
 	var selected_id := selected_dead.id if selected_dead != null else -1
 	for death in simulation.death_events:
 		var reason_text := "饥饿" if death["reason"] == "starvation" else "寿终"
-		var text := "居民 #%03d %s · 年龄 %d · 财富 %.1f" % [death["id"], reason_text, death["age"], death["wealth"]]
+		var gen_text := "第 %d 代" % death["generation"]
+		var text := "居民 #%03d %s · %s · 年龄 %d · 财富 %.1f" % [death["id"], reason_text, gen_text, death["age"], death["wealth"]]
 		if death["id"] == selected_id:
 			var color := Color(0.55, 0.85, 0.55, 1) if death["reason"] == "age" else Color(0.95, 0.84, 0.55, 1)
 			selected_death_message.text = text
@@ -246,8 +277,8 @@ func add_message(text: String, color: Color = Color(0.95, 0.84, 0.55, 1)) -> voi
 	label.text = text
 	label.add_theme_color_override("font_color", color)
 	label.add_theme_font_size_override("font_size", 14)
-	label.position = Vector2(0, message_feed.size.y - MESSAGE_HEIGHT)
-	label.size = Vector2(message_feed.size.x, MESSAGE_HEIGHT)
+	label.position = Vector2(MESSAGE_PADDING, message_feed.size.y - MESSAGE_HEIGHT)
+	label.size = Vector2(message_feed.size.x - MESSAGE_PADDING * 2, MESSAGE_HEIGHT)
 	message_feed.add_child(label)
 	message_entries.append({"label": label, "age": 0.0})
 	while message_entries.size() > MESSAGE_MAX:
@@ -274,6 +305,20 @@ func layout_messages(delta: float) -> void:
 		if age > MESSAGE_LIFETIME - MESSAGE_FADE_TIME:
 			alpha = clampf((MESSAGE_LIFETIME - age) / MESSAGE_FADE_TIME, 0.0, 1.0)
 		label.modulate.a = alpha
+	# Update background to fit visible messages
+	if _feed_bg != null:
+		var visible_count := 0
+		for entry in message_entries:
+			if float(entry["age"]) < MESSAGE_LIFETIME:
+				visible_count += 1
+		if visible_count == 0:
+			_feed_bg.visible = false
+		else:
+			_feed_bg.visible = true
+			var bg_height := visible_count * MESSAGE_HEIGHT + MESSAGE_PADDING * 2
+			var bg_width := message_feed.size.x
+			_feed_bg.position = Vector2(0, message_feed.size.y - bg_height)
+			_feed_bg.size = Vector2(bg_width, bg_height)
 	# Remove fully faded messages
 	var i := 0
 	while i < message_entries.size():
@@ -320,6 +365,7 @@ func sync_residents(animate: bool) -> void:
 		resident.tint = Color("f8f4e8").lerp(Color("d4af37"), clampf(citizen.wealth / 40.0, 0.0, 1.0))
 		resident.vision = citizen.vision
 		resident.tile_size = TILE_SIZE
+		resident.generation = citizen.generation
 		resident.selected = citizen == selected_citizen
 		resident.set_thought(thought_for(citizen) if resident.selected else "")
 		resident.set_process(running)
@@ -425,6 +471,23 @@ func toggle_fog() -> void:
 	update_fog_layer()
 
 
+func open_settings() -> void:
+	if settings_panel != null and is_instance_valid(settings_panel):
+		settings_panel.queue_free()
+		return
+	var was_running := running
+	set_running(false)
+	settings_panel = SettingsPanel.new()
+	settings_panel.world = self
+	settings_panel.closed.connect(func(): set_running(was_running))
+	add_child(settings_panel)
+	settings_panel.move_to_front()
+
+
+func apply_settings() -> void:
+	reset()
+
+
 func toggle_recording() -> void:
 	recording = not recording
 	if recording:
@@ -516,8 +579,8 @@ func _process(delta: float) -> void:
 			update_recording_status()
 	if running:
 		elapsed += delta
-		if elapsed >= STEP_SECONDS:
-			elapsed = fmod(elapsed, STEP_SECONDS)
+		if elapsed >= step_seconds:
+			elapsed = fmod(elapsed, step_seconds)
 			advance()
 	update_selected_follow(delta)
 	update_fog_layer()
@@ -640,6 +703,27 @@ func thought_for(citizen: Simulation.Citizen) -> String:
 	var thought := "附近没有糖，继续寻找"
 	if citizen.wealth <= citizen.metabolism * 2:
 		thought = "我需要糖！"
+	elif citizen.wealth >= citizen.metabolism * 25.0:
+		if simulation.repopulate_mode == "breed" and citizen.age >= simulation.breed_age_min and citizen.age <= simulation.breed_age_max:
+			var has_partner := false
+			for other in simulation.citizens:
+				if other.id != citizen.id and other.death_reason.is_empty() and other.wealth >= other.metabolism * 5.0:
+					if other.age >= simulation.breed_age_min and other.age <= simulation.breed_age_max:
+						if simulation._in_vision(citizen, other) and simulation._in_vision(other, citizen):
+							has_partner = true
+							break
+			thought = "看到Ta了，想生个孩子" if has_partner else "财富自由，想找个伴侣"
+		else:
+			thought = "财富自由，到处逛逛"
+	elif simulation.repopulate_mode == "breed" and citizen.wealth >= citizen.metabolism * 5.0 and citizen.age >= simulation.breed_age_min and citizen.age <= simulation.breed_age_max:
+		var has_partner := false
+		for other in simulation.citizens:
+			if other.id != citizen.id and other.death_reason.is_empty() and other.wealth >= other.metabolism * 5.0:
+				if other.age >= simulation.breed_age_min and other.age <= simulation.breed_age_max:
+					if simulation._in_vision(citizen, other) and simulation._in_vision(other, citizen):
+						has_partner = true
+						break
+		thought = "想找个好伴侣" if not has_partner else "看到Ta了，想生个孩子"
 	elif best_sugar > current_sugar + 0.1:
 		thought = "去找更肥的糖田"
 	elif current_sugar > 0.1:
@@ -682,11 +766,13 @@ func update_panel() -> void:
 	var stats := simulation.get_stats()
 	status.text = "糖域纪年 %03d 年  /  %s" % [simulation.tick, "运行中" if running else "已暂停"]
 	update_recording_status()
-	economy.text = "人口 %d · 累计补入 %d\n总财富 %.1f · 人均 %.1f\n财富基尼 %.3f · 地图存糖 %.1f\n本轮采集 %.1f · 代谢 %.1f\n死亡释放 %.1f · 累计死亡：饥饿 %d / 寿终 %d" % [
-		stats.population, simulation.replacements, stats.total_wealth, stats.mean_wealth,
-		stats.gini, stats.land_sugar, stats.harvested, stats.consumed, stats.released_wealth,
+	var repopulate_text := "累计补入 %d" % simulation.replacements if simulation.repopulate_mode == "system" else "累计繁殖 %d" % simulation.bred
+	economy.text = "人口 %d · %s\n总财富 %.1f · 人均 %.1f\n财富基尼 %.3f · 地图存糖 %.1f\n本轮采集 %.1f · 代谢 %.1f · 移动 %.1f\n死亡释放 %.1f · 累计死亡：饥饿 %d / 寿终 %d" % [
+		stats.population, repopulate_text, stats.total_wealth, stats.mean_wealth,
+		stats.gini, stats.land_sugar, stats.harvested, stats.consumed, stats.move_cost, stats.released_wealth,
 		simulation.starved, simulation.aged_out,
 	]
+	_update_generation_palette()
 	if selected_cell.x < 0:
 		selection.text = "点击居民或格子查看详情\n\n居民在视野内寻找最多的糖，\n采集所得用于支付每轮代谢。"
 		return
@@ -703,10 +789,66 @@ func update_panel() -> void:
 		]
 	else:
 		var control_text := "用户接管中 · 方向键移动" if manual_controlled else "自动行动 · 按 E 接管"
-		selection.text = "居民 #%03d · %s\n%s\n财富 %.2f · 本轮采集 %.2f\n代谢 %d / 轮 · 视野 %d 格\n年龄 %d / %d 轮" % [
-			selected_citizen.id, control_text, cell_info, selected_citizen.wealth, selected_citizen.last_harvest,
+		var parents_text := "无"
+		if not selected_citizen.parents.is_empty():
+			var parts: Array[String] = []
+			for parent_id in selected_citizen.parents:
+				var alive := false
+				for c in simulation.citizens:
+					if c.id == parent_id:
+						alive = true
+						break
+				var color := "green" if alive else "yellow"
+				parts.append("[color=%s]#%03d[/color]" % [color, parent_id])
+			parents_text = ", ".join(parts)
+		selection.text = "居民 #%03d · 第 %d 代 · %s\n%s\n财富 %.2f · 本轮采集 %.2f\n代谢 %d / 轮 · 视野 %d 格\n年龄 %d / %d 轮\n父母：%s · 孩子 %d" % [
+			selected_citizen.id, selected_citizen.generation, control_text, cell_info, selected_citizen.wealth, selected_citizen.last_harvest,
 			selected_citizen.metabolism, selected_citizen.vision, selected_citizen.age, selected_citizen.max_age,
+			parents_text, selected_citizen.children.size(),
 		]
+
+
+func _update_generation_palette() -> void:
+	if generation_palette == null:
+		return
+	var counts: Array[int] = []
+	counts.resize(10)
+	counts.fill(0)
+	var gen_sets: Array[Array] = []
+	gen_sets.resize(10)
+	for i in 10:
+		gen_sets[i] = []
+	for citizen in simulation.citizens:
+		var idx := citizen.generation % 10
+		counts[idx] = counts[idx] + 1
+		if not gen_sets[idx].has(citizen.generation):
+			gen_sets[idx].append(citizen.generation)
+	for i in 10:
+		gen_sets[i].sort()
+	generation_palette.update_counts(counts, gen_sets)
+
+
+func _on_swatch_clicked(generation: int) -> void:
+	var richest: Simulation.Citizen = null
+	for citizen in simulation.citizens:
+		if citizen.generation % 10 != generation:
+			continue
+		if richest == null or citizen.wealth > richest.wealth:
+			richest = citizen
+	if richest == null:
+		return
+	selected_citizen = richest
+	selected_cell = richest.cell
+	fog_enabled = true
+	for citizen in simulation.citizens:
+		var resident: Resident = residents[citizen.id]
+		resident.selected = citizen == selected_citizen
+		if not tutorial_mode:
+			resident.set_thought(thought_for(citizen) if resident.selected else "")
+		resident.queue_redraw()
+	update_panel()
+	update_map_layer()
+	update_fog_layer()
 
 
 func cell_center(cell: Vector2i) -> Vector2:

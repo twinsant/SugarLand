@@ -327,14 +327,21 @@ func _step_with_budget(model) -> void:
 		expected_growth += minf(model.capacities[index], model.sugar[index] + 1.0) - model.sugar[index]
 	for citizen in old_citizens:
 		expected_consumed += citizen.metabolism
+	var old_cells: Dictionary = {}
+	for citizen in old_citizens:
+		old_cells[citizen.id] = citizen.cell
 	model.step()
 	var after: Dictionary = model.get_stats()
 	var injected := 0.0
 	var removed := 0.0
 	var released := 0.0
 	var harvested := 0.0
+	var expected_move_cost := 0.0
 	for citizen in old_citizens:
 		harvested += citizen.last_harvest
+		var prev_cell: Vector2i = old_cells[citizen.id]
+		if citizen.cell != prev_cell:
+			expected_move_cost += model._distance(prev_cell, citizen.cell) * model.move_cost
 		if not model.citizens.has(citizen):
 			removed += citizen.wealth
 			if citizen.wealth > 0.0:
@@ -344,13 +351,14 @@ func _step_with_budget(model) -> void:
 			injected += citizen.wealth
 	_near(after.growth, expected_growth, "独立计算增长量", 0.001)
 	_near(after.consumed, expected_consumed, "独立计算代谢量")
+	_near(after.move_cost, expected_move_cost, "独立计算移动消耗", 0.001)
 	_near(after.harvested, harvested, "独立计算收割量")
 	_near(after.injected_wealth, injected, "独立计算新人财富注入")
 	_near(after.removed_wealth, removed, "独立计算死者财富移除")
 	_near(after.released_wealth, released, "独立计算死亡财富释放")
 	_near(after.land_sugar - before.land_sugar, expected_growth - harvested + released, "土地预算", 0.001)
-	_near(after.total_wealth - before.total_wealth, harvested - expected_consumed + injected - removed, "居民预算", 0.001)
-	_near(after.land_sugar + after.total_wealth - before.land_sugar - before.total_wealth, expected_growth - expected_consumed + injected - removed + released, "总资源及财富守恒预算", 0.001)
+	_near(after.total_wealth - before.total_wealth, harvested - expected_consumed - expected_move_cost + injected - removed, "居民预算", 0.001)
+	_near(after.land_sugar + after.total_wealth - before.land_sugar - before.total_wealth, expected_growth - expected_consumed - expected_move_cost + injected - removed + released, "总资源及财富守恒预算", 0.001)
 
 
 func _test_long_run() -> void:

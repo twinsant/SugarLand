@@ -70,7 +70,7 @@ func run() -> void:
 	var step_button: Button = scene.get_node("%Step")
 	var reset_button: Button = scene.get_node("%Reset")
 	var record_button: Button = scene.get_node("%Record")
-	var selection: Label = scene.get_node("%Selection")
+	var selection: RichTextLabel = scene.get_node("%Selection")
 	var economy: Label = scene.get_node("%Economy")
 	var status: Label = scene.get_node("%Status")
 	var recording_status: Label = scene.get_node("%RecordingStatus")
@@ -137,6 +137,133 @@ func run() -> void:
 	check(scene.simulation.tick == 0 and scene.running, "Reset button must restart the clock")
 	check(economy.text == initial_economy, "Reset must restore initial economic statistics")
 	check(scene.simulation.citizens[0].cell == initial_cell and scene.simulation.citizens[0].wealth == initial_wealth, "Reset must restore initial residents")
+	var settings_button: Button = scene.get_node("%Settings")
+	click(settings_button.get_global_rect().get_center())
+	check(scene.settings_panel != null and is_instance_valid(scene.settings_panel), "Settings button must open the settings panel")
+	check(not scene.running, "Opening settings must pause the economy")
+	var panel = scene.settings_panel
+	panel._growth_rate.value = 2.5
+	panel._peak_capacity.value = 6.0
+	panel._apply()
+	await process_frame
+	check(scene.simulation.growth_rate == 2.5, "Applying settings must update the growth rate")
+	check(scene.simulation.peak_capacity == 6.0, "Applying settings must update the peak capacity")
+	check(scene.simulation.tick == 0, "Applying settings must reset the simulation")
+	check(not is_instance_valid(panel), "Applying settings must close the panel")
+	check(scene.running, "Closing settings must restore the running state")
+	scene.simulation.growth_rate = 1.0
+	scene.simulation.peak_capacity = 4.0
+	scene.simulation.peak_a = Vector2i(15, 15)
+	scene.simulation.peak_b = Vector2i(35, 35)
+	scene.simulation.peak_falloff = 0.16
+	# Breed mode: two wealthy residents in mutual vision produce a child
+	scene.simulation.repopulate_mode = "breed"
+	scene.reset()
+	# Place two residents adjacent with high wealth and vision to guarantee breeding
+	var a = scene.simulation.citizens[0]
+	var b = scene.simulation.citizens[1]
+	a.cell = Vector2i(25, 25)
+	a.wealth = 20.0
+	a.metabolism = 1
+	a.vision = 6
+	a.age = 20
+	a.max_age = 100
+	b.cell = Vector2i(26, 25)
+	b.wealth = 20.0
+	b.metabolism = 1
+	b.vision = 6
+	b.age = 20
+	b.max_age = 100
+	# Clear all sugar and set high sugar only at a and b positions so they stay put
+	scene.simulation.sugar.fill(0.0)
+	scene.simulation.capacities.fill(0.0)
+	scene.simulation.capacities[25 * 50 + 25] = 100.0
+	scene.simulation.capacities[25 * 50 + 26] = 100.0
+	scene.simulation.sugar[25 * 50 + 25] = 100.0
+	scene.simulation.sugar[25 * 50 + 26] = 100.0
+	# Clear other citizens' wealth to prevent them from breeding
+	for i in range(2, scene.simulation.citizens.size()):
+		scene.simulation.citizens[i].wealth = 0.1
+	scene.advance()
+	check(scene.simulation.bred > 0, "Breed mode must produce children when two wealthy residents see each other")
+	check(scene.simulation.replacements == 0, "Breed mode must not use system replacement")
+	check(not scene.simulation.breeding_events.is_empty(), "Breed event must be recorded")
+	var event = scene.simulation.breeding_events[0]
+	check(event.has("parent_a") and event.has("parent_b") and event.has("child"), "Breed event must record parent and child ids")
+	check(scene.heart_markers.size() > 0, "Heart marker must be created for breeding event")
+	var marker = scene.heart_markers[0]
+	check(marker.parent_a != null and marker.parent_b != null, "Heart marker must track parent residents")
+	# Child inherits average parent vision within mutation range
+	var child_id = event["child"]
+	var child = null
+	for citizen in scene.simulation.citizens:
+		if citizen.id == child_id:
+			child = citizen
+			break
+	check(child != null, "Breed child must exist in citizens")
+	if child != null:
+		var avg_vision = (a.vision + b.vision) / 2
+		check(child.vision == clampi(avg_vision - 1, 1, 6) or child.vision == avg_vision or child.vision == clampi(avg_vision + 1, 1, 6), "Breed child must inherit average parent vision within mutation")
+		check(child.wealth > 0.0, "Breed child must receive wealth from parents")
+		check(child.age == 0, "Breed child must start at age 0")
+	# Parents' wealth decreased compared to no-breeding baseline
+	var no_breed_wealth := 20.0 + 100.0 - 1.0
+	check(a.wealth < no_breed_wealth and b.wealth < no_breed_wealth, "Breed parents must contribute wealth to child")
+	# Death inheritance: parent dies, wealth splits among surviving children
+	var parent_a_id = a.id
+	var child_wealth_before = child.wealth
+	# Kill parent a
+	a.max_age = a.age + 1
+	scene.advance()
+	# Find the child again (it may have moved in citizens array)
+	var child_after = null
+	for citizen in scene.simulation.citizens:
+		if citizen.id == child_id:
+			child_after = citizen
+			break
+	if child_after != null:
+		check(child_after.wealth > child_wealth_before, "Child must inherit wealth when parent dies in breed mode")
+	# Parent a should be dead
+	var parent_a_alive = false
+	for citizen in scene.simulation.citizens:
+		if citizen.id == parent_a_id:
+			parent_a_alive = true
+			break
+	check(not parent_a_alive, "Parent must die after reaching max age")
+	# Age limit: residents outside breeding age cannot breed
+	scene.simulation.repopulate_mode = "breed"
+	scene.simulation.bred = 0
+	scene.simulation.breeding_events.clear()
+	scene.reset()
+	var young = scene.simulation.citizens[0]
+	var old = scene.simulation.citizens[1]
+	young.cell = Vector2i(25, 25)
+	young.wealth = 50.0
+	young.metabolism = 1
+	young.vision = 6
+	young.age = 5
+	young.max_age = 100
+	old.cell = Vector2i(26, 25)
+	old.wealth = 50.0
+	old.metabolism = 1
+	old.vision = 6
+	old.age = 70
+	old.max_age = 100
+	scene.simulation.sugar.fill(0.0)
+	scene.simulation.capacities.fill(0.0)
+	scene.simulation.capacities[25 * 50 + 25] = 100.0
+	scene.simulation.capacities[25 * 50 + 26] = 100.0
+	scene.simulation.sugar[25 * 50 + 25] = 100.0
+	scene.simulation.sugar[25 * 50 + 26] = 100.0
+	for i in range(2, scene.simulation.citizens.size()):
+		scene.simulation.citizens[i].wealth = 0.1
+	scene.advance()
+	check(scene.simulation.bred == 0, "Residents outside breeding age must not breed")
+	# Restore system mode
+	scene.simulation.repopulate_mode = "system"
+	scene.simulation.bred = 0
+	scene.simulation.breed_age_min = 15
+	scene.simulation.breed_age_max = 65
 	click(record_button.get_global_rect().get_center())
 	check(scene.recording and record_button.text.begins_with("停止录像"), "Record button must start frame capture")
 	await create_timer(0.1).timeout
