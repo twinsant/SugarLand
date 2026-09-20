@@ -1,0 +1,705 @@
+// world.lpc — SugarLand 默认世界规则（mudlib）
+// 与本地 Godot 模型（godot/simulation.gd）逐条对齐：
+//   G 生长 → M 居民行动（择地→采集/租金→代谢/移动消耗/衰老→购地）
+//   → Trade（可选变体，默认关）→ R 死亡结算（土地继承 + 财富释放/子女继承）
+//   → 繁殖（repopulate_mode=="breed"）或系统补人（=="system"）→ 统计上报
+// 内核只在初始化/重置时调用 create()，每步调用一次 heart_beat()
+
+int W = 50;
+int H = 50;
+
+// 死因计数由 mudlib 记账（内核只按 reason tag 累计，不懂语义）
+int deaths_by_age = 0;
+int deaths_by_hunger = 0;
+
+// 每步账务（对应本地 _clear_budget 组）
+float step_growth = 0.0;
+float step_rent = 0.0;
+float step_move_cost = 0.0;
+float step_injected = 0.0;
+float step_removed = 0.0;
+float step_released = 0.0;
+int step_births = 0;
+
+// --- 工具 ---
+
+int wrap(int v, int m) {
+    int r = v % m;
+    if (r < 0) { r = r + m; }
+    return r;
+}
+
+int axis_dist(int a, int b, int m) {
+    int d = abs(a - b);
+    if (d > m / 2) { d = m - d; }
+    return d;
+}
+
+int torus_dist(int x1, int y1, int x2, int y2) {
+    return axis_dist(x1, x2, W) + axis_dist(y1, y2, H);
+}
+
+// 环面中点（与本地 _torus_midpoint 一致）
+int torus_mid_x(int ax, int bx) {
+    int dx = bx - ax;
+    if (abs(dx) > W / 2) {
+        if (dx > 0) { dx = dx - W; } else { dx = dx + W; }
+    }
+    return wrap(ax + dx / 2, W);
+}
+
+int torus_mid_y(int ay, int by) {
+    int dy = by - ay;
+    if (abs(dy) > H / 2) {
+        if (dy > 0) { dy = dy - H; } else { dy = dy + H; }
+    }
+    return wrap(ay + dy / 2, H);
+}
+
+int cell_empty(int x, int y) {
+    return sizeof(query_contents(wrap(x, W), wrap(y, H))) == 0;
+}
+
+float cfg_float(string k) { return to_float(query_config(k)); }
+int cfg_int(string k) { return to_int(query_config(k)); }
+
+int clampi(int v, int lo, int hi) {
+    if (v < lo) { return lo; }
+    if (v > hi) { return hi; }
+    return v;
+}
+
+// --- 世界生成：内核在初始化/重置时调用 create() ---
+
+// 随机基因：vision U[1,6]、metabolism U[1,4]、max_age U[60,100]、wealth U[5,25] 浮点
+void randomize(int id) {
+    set_citizen(id, "vision", random(6) + 1);
+    set_citizen(id, "metabolism", random(4) + 1);
+    set_citizen(id, "max_age", random(41) + 60);
+    set_citizen(id, "age", 0);
+    set_citizen(id, "wealth", 5.0 + to_float(random(2000)) / 100.0);
+    set_citizen(id, "generation", 0);
+    set_citizen(id, "children", ({}));
+    set_citizen(id, "parents", ({}));
+    set_citizen(id, "land", ({}));
+    set_citizen(id, "last_action", "");
+    set_citizen(id, "last_rent", 0.0);
+    set_citizen(id, "total_harvest", 0.0);
+    set_citizen(id, "last_move_dist", 0);
+}
+
+// 随机找一格无人占据的空格生成居民（与本地 _spawn 一致：任意格，不限容量）
+int spawn_free() {
+    for (int t = 0; t < W * H; t++) {
+        int x = random(W);
+        int y = random(H);
+        if (cell_empty(x, y)) {
+            int id = spawn_citizen(x, y);
+            randomize(id);
+            return id;
+        }
+    }
+    return 0;
+}
+
+// 声明本游戏的默认参数：内核不携带游戏默认值，
+// 客户端显式传入的键优先，缺失的键由 mudlib 补齐并回写配置
+void declare_defaults() {
+    if (!has_config("peak_x1")) { set_config("peak_x1", 15); }
+    if (!has_config("peak_y1")) { set_config("peak_y1", 15); }
+    if (!has_config("peak_x2")) { set_config("peak_x2", 35); }
+    if (!has_config("peak_y2")) { set_config("peak_y2", 35); }
+    if (!has_config("peak_capacity")) { set_config("peak_capacity", 4.0); }
+    if (!has_config("peak_falloff")) { set_config("peak_falloff", 0.16); }
+    if (!has_config("growth_rate")) { set_config("growth_rate", 1.0); }
+    if (!has_config("init_population")) { set_config("init_population", 80); }
+    // 人口补充方式：system（系统补人）或 breed（繁殖），与本地 repopulate_mode 一致
+    if (!has_config("repopulate_mode")) { set_config("repopulate_mode", "system"); }
+    if (!has_config("breed_age_min")) { set_config("breed_age_min", 15); }
+    if (!has_config("breed_age_max")) { set_config("breed_age_max", 65); }
+    if (!has_config("move_cost")) { set_config("move_cost", 0.5); }
+    // 土地私有制：购地/租金/继承，默认关，与本地 land_privacy_enabled 一致
+    if (!has_config("land_privacy_enabled")) { set_config("land_privacy_enabled", 0); }
+    if (!has_config("rent_rate")) { set_config("rent_rate", 0.8); }
+    // 变体开关：本地模型没有的易货贸易，默认关
+    if (!has_config("enable_trading")) { set_config("enable_trading", 0); }
+}
+
+void create() {
+    declare_defaults();
+    deaths_by_age = 0;
+    deaths_by_hunger = 0;
+    step_growth = 0.0;
+    step_rent = 0.0;
+    step_move_cost = 0.0;
+    step_injected = 0.0;
+    step_removed = 0.0;
+    step_released = 0.0;
+    step_births = 0;
+    W = grid_width();
+    H = grid_height();
+    float peak = cfg_float("peak_capacity");
+    float falloff = cfg_float("peak_falloff");
+    int px1 = cfg_int("peak_x1");
+    int py1 = cfg_int("peak_y1");
+    int px2 = cfg_int("peak_x2");
+    int py2 = cfg_int("peak_y2");
+    // 双峰糖地形：容量 = peak - min(到两峰环面距离) * falloff，糖量从满容量开始
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            int d1 = torus_dist(x, y, px1, py1);
+            int d2 = torus_dist(x, y, px2, py2);
+            float cap = peak - to_float(min(d1, d2)) * falloff;
+            if (cap < 0.0) { cap = 0.0; }
+            set_cell(x, y, "capacity", cap);
+            set_cell(x, y, "sugar", cap);
+            // room 拓扑：四邻环面出口（mudlib 定义连接表，内核只管存储与沿 exit 移动）
+            link_exit(x, y, "north", x, y - 1);
+            link_exit(x, y, "south", x, y + 1);
+            link_exit(x, y, "east", x + 1, y);
+            link_exit(x, y, "west", x - 1, y);
+        }
+    }
+    int n = cfg_int("init_population");
+    for (int i = 0; i < n; i++) {
+        if (spawn_free() == 0) { break; }
+    }
+}
+
+// --- G：生长规则 ---
+
+void grow_all() {
+    float rate = cfg_float("growth_rate");
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            float before = query_cell(x, y, "sugar");
+            float cap = query_cell(x, y, "capacity");
+            float s = before + rate;
+            if (s > cap) { s = cap; }
+            set_cell(x, y, "sugar", s);
+            step_growth = step_growth + (s - before);
+        }
+    }
+}
+
+// --- M：居民行动 ---
+// 择地由居民 LPC 对象（citizen.lpc heart_beat）完成，只决定去向并写 last_action；
+// 采集/租金/代谢/移动消耗/衰老/购地由世界统一结算（与本地顺序一致）
+
+// 代谢 + 移动消耗 + 衰老（last_move_dist 由内核移动原语记账）
+void metabolize(int id) {
+    float wealth = to_float(query_citizen(id, "wealth"));
+    int dist = query_citizen(id, "last_move_dist");
+    if (dist > 0) {
+        float cost = to_float(dist) * cfg_float("move_cost");
+        wealth = wealth - cost;
+        step_move_cost = step_move_cost + cost;
+        set_citizen(id, "last_move_dist", 0);
+    }
+    int m = query_citizen(id, "metabolism");
+    wealth = wealth - to_float(m);
+    set_citizen(id, "wealth", wealth);
+    set_citizen(id, "age", query_citizen(id, "age") + 1);
+    record_consumed(m);
+}
+
+// 土地收购：所站位置 3×3 内无主土地按 2×峰值容量计价，
+// 购买顺序按环面距离升序（中心→十字→角），每次购买保留代谢×25 生存财富
+void acquire_land(int id) {
+    float price = cfg_float("peak_capacity") * 2.0;
+    float reserve = to_float(query_citizen(id, "metabolism")) * 25.0;
+    float wealth = to_float(query_citizen(id, "wealth"));
+    int x = query_citizen(id, "x");
+    int y = query_citizen(id, "y");
+    // 与本地 buyable 行序 + 稳定距离排序等价：中心，十字（上左右下），四角
+    int ox = ({0, 0, -1, 1, 0, -1, 1, -1, 1});
+    int oy = ({0, -1, 0, 0, 1, -1, -1, 1, 1});
+    int land = query_citizen(id, "land");
+    int bought = 0;
+    for (int i = 0; i < 9; i++) {
+        int nx = wrap(x + ox[i], W);
+        int ny = wrap(y + oy[i], H);
+        if (to_int(query_cell(nx, ny, "owner")) != 0) { continue; }
+        if (wealth - price < reserve) { break; }
+        set_cell(nx, ny, "owner", id);
+        wealth = wealth - price;
+        land = push(land, ny * W + nx);
+        bought = 1;
+    }
+    if (bought) {
+        set_citizen(id, "land", land);
+        set_citizen(id, "wealth", wealth);
+        set_citizen(id, "last_action", "bought");
+    }
+}
+
+// 采集 + 租金分成：在他人私有地采集时 rent_rate 归地主，其余归采集者
+void settle_harvest(int id) {
+    int x = query_citizen(id, "x");
+    int y = query_citizen(id, "y");
+    float got = take_cell(x, y, "sugar");
+    float rent = 0.0;
+    if (cfg_int("land_privacy_enabled")) {
+        int owner = to_int(query_cell(x, y, "owner"));
+        if (owner != 0 && owner != id && citizen_exists(owner)) {
+            rent = got * cfg_float("rent_rate");
+            set_citizen(owner, "wealth", to_float(query_citizen(owner, "wealth")) + rent);
+            set_citizen(owner, "last_rent", to_float(query_citizen(owner, "last_rent")) + rent);
+            step_rent = step_rent + rent;
+            set_citizen(id, "last_action", "rent_paid");
+        }
+    }
+    set_citizen(id, "wealth", to_float(query_citizen(id, "wealth")) + got - rent);
+    set_citizen(id, "total_harvest", to_float(query_citizen(id, "total_harvest")) + got);
+}
+
+void settle_citizen(int id) {
+    settle_harvest(id);
+    metabolize(id);
+    if (cfg_int("land_privacy_enabled")) {
+        acquire_land(id);
+    }
+}
+
+void move_all() {
+    int ids = citizen_ids();
+    ids = shuffle(ids);
+    for (int i = 0; i < sizeof(ids); i++) {
+        int id = ids[i];
+        if (!citizen_exists(id)) { continue; }
+        if (!query_citizen(id, "alive")) { continue; }
+        if (query_citizen(id, "agent_controlled")) {
+            // 被 agent 接管的居民已由命令原语放置；补 last_action（与本地一致）
+            int d0 = query_citizen(id, "last_move_dist");
+            if (d0 == 0) {
+                set_citizen(id, "last_action", "stay");
+            } else {
+                if (to_float(query_citizen(id, "wealth")) >=
+                    to_float(query_citizen(id, "metabolism")) * 25.0) {
+                    set_citizen(id, "last_action", "wander");
+                } else {
+                    set_citizen(id, "last_action", "seek");
+                }
+            }
+        } else {
+            call_citizen(id, "heart_beat");
+        }
+        settle_citizen(id);
+    }
+}
+
+// --- Trade：易货贸易（本地模型没有的变体，默认关） ---
+
+// 边际效用：财富越少效用越高
+float mu(int id) {
+    float wealth = to_float(query_citizen(id, "wealth"));
+    if (wealth <= 0.0) { return 100.0; }
+    return 1.0 / (wealth + 1.0);
+}
+
+// 是否相邻：环面距离 <= min(双方视野)
+int adjacent(int a, int b) {
+    int va = query_citizen(a, "vision");
+    int vb = query_citizen(b, "vision");
+    int d = torus_dist(query_citizen(a, "x"), query_citizen(a, "y"),
+                       query_citizen(b, "x"), query_citizen(b, "y"));
+    return d <= min(va, vb);
+}
+
+void try_trade(int a, int b) {
+    float mua = mu(a);
+    float mub = mu(b);
+    if (mua <= 0.0 && mub <= 0.0) { return; }
+    // 策略：代谢率 >= 3 为 Bull（小额），否则 Bear（大额）
+    int sa = 0;
+    if (query_citizen(a, "metabolism") >= 3) { sa = 1; }
+    int sb = 0;
+    if (query_citizen(b, "metabolism") >= 3) { sb = 1; }
+    float amount_a = 2.0;
+    float amount_b = 2.0;
+    if (sa == 1 && sb == 1) {
+        amount_a = 1.0;
+        amount_b = 1.0;
+    } else if (sa == 0 && sb == 0) {
+        amount_a = to_float(query_citizen(a, "wealth")) / 4.0;
+        amount_b = to_float(query_citizen(b, "wealth")) / 4.0;
+    }
+    // 按边际效用差调整交换量：效用高的一方少付出
+    if (mua > mub && amount_b > 0.0) {
+        float ratio = mua / (mua + mub + 0.001);
+        amount_b = amount_b * (1.0 - ratio);
+        if (amount_b < 1.0) { amount_b = 1.0; }
+    } else if (mub > mua && amount_a > 0.0) {
+        float ratio = mub / (mua + mub + 0.001);
+        amount_a = amount_a * (1.0 - ratio);
+        if (amount_a < 1.0) { amount_a = 1.0; }
+    }
+    if (to_float(query_citizen(a, "wealth")) < amount_a ||
+        to_float(query_citizen(b, "wealth")) < amount_b) { return; }
+    if (amount_a <= 0.0 && amount_b <= 0.0) { return; }
+    set_citizen(a, "wealth", to_float(query_citizen(a, "wealth")) - amount_a + amount_b);
+    set_citizen(b, "wealth", to_float(query_citizen(b, "wealth")) - amount_b + amount_a);
+}
+
+void do_trading() {
+    if (!cfg_int("enable_trading")) { return; }
+    int ids = citizen_ids();
+    for (int i = 0; i < sizeof(ids); i++) {
+        int a = ids[i];
+        if (!citizen_exists(a) || !query_citizen(a, "alive")) { continue; }
+        int nbrs = query_neighbors(a, query_citizen(a, "vision"));
+        for (int j = 0; j < sizeof(nbrs); j++) {
+            int b = nbrs[j];
+            // b > a 保证每对只处理一次；adjacent 检查 min(双方视野)
+            if (b > a && adjacent(a, b)) {
+                try_trade(a, b);
+            }
+        }
+    }
+}
+
+// --- R：死亡结算 ---
+
+// 存活且不在本轮死亡名单中的子女列表
+int live_children(int id, int deads) {
+    int out = ({});
+    int children = query_citizen(id, "children");
+    for (int k = 0; k < sizeof(children); k++) {
+        int cid = children[k];
+        if (citizen_exists(cid) && query_citizen(cid, "alive") && member(cid, deads) < 0) {
+            out = push(out, cid);
+        }
+    }
+    return out;
+}
+
+void reap() {
+    int ids = citizen_ids();
+    // 先标记本轮全部死者（避免父先死、子女同轮死亡仍被当继承人）
+    int deads = ({});
+    for (int i = 0; i < sizeof(ids); i++) {
+        int id = ids[i];
+        if (!citizen_exists(id)) { continue; }
+        float wealth = to_float(query_citizen(id, "wealth"));
+        int age = query_citizen(id, "age");
+        int max_age = query_citizen(id, "max_age");
+        if (!query_citizen(id, "alive") || wealth <= 0.0 || age >= max_age) {
+            deads = push(deads, id);
+        }
+    }
+    int breed_mode = 0;
+    if (query_config("repopulate_mode") == "breed") { breed_mode = 1; }
+    for (int i = 0; i < sizeof(deads); i++) {
+        int id = deads[i];
+        int x = query_citizen(id, "x");
+        int y = query_citizen(id, "y");
+        float wealth = to_float(query_citizen(id, "wealth"));
+        int age = query_citizen(id, "age");
+        int max_age = query_citizen(id, "max_age");
+        string reason = "hunger";
+        if (age >= max_age) { reason = "age"; }
+        // 土地：转给最富有的存活子女，无子女则释放为无主
+        int land = query_citizen(id, "land");
+        if (sizeof(land) > 0) {
+            int heirs = live_children(id, deads);
+            int heir = 0;
+            float hw = -1.0;
+            for (int k = 0; k < sizeof(heirs); k++) {
+                float cw = to_float(query_citizen(heirs[k], "wealth"));
+                if (cw > hw) { hw = cw; heir = heirs[k]; }
+            }
+            int hland = ({});
+            if (heir != 0) { hland = query_citizen(heir, "land"); }
+            for (int k = 0; k < sizeof(land); k++) {
+                int idx = land[k];
+                int lx = idx % W;
+                int ly = idx / W;
+                if (heir != 0) {
+                    set_cell(lx, ly, "owner", heir);
+                    hland = push(hland, idx);
+                } else {
+                    set_cell(lx, ly, "owner", 0);
+                }
+            }
+            if (heir != 0) {
+                set_citizen(heir, "land", hland);
+                set_citizen(heir, "last_action", "inherited");
+            }
+        }
+        step_removed = step_removed + wealth;
+        if (wealth > 0.0) {
+            int heirs = live_children(id, deads);
+            if (breed_mode && sizeof(heirs) > 0) {
+                // 繁殖模式：正财富平分给存活子女
+                float share = wealth / to_float(sizeof(heirs));
+                for (int k = 0; k < sizeof(heirs); k++) {
+                    int cid = heirs[k];
+                    set_citizen(cid, "wealth", to_float(query_citizen(cid, "wealth")) + share);
+                    set_citizen(cid, "last_action", "inherited");
+                }
+            } else {
+                // 释放回死亡格，受容量限制
+                float cap = query_cell(x, y, "capacity");
+                float s = query_cell(x, y, "sugar");
+                float rel = wealth;
+                float head = cap - s;
+                if (rel > head) { rel = head; }
+                if (rel < 0.0) { rel = 0.0; }
+                set_cell(x, y, "sugar", s + rel);
+                step_released = step_released + rel;
+            }
+        }
+        remove_citizen(id, reason);
+        if (reason == "age") { deaths_by_age++; } else { deaths_by_hunger++; }
+    }
+}
+
+// --- Mate：繁殖（repopulate_mode == "breed"，与本地 _check_breeding 一致） ---
+
+// b 是否在 a 的正交视线内（同行/同列且环面轴距 <= a 的视野）
+int in_vision(int a, int b) {
+    int ax = query_citizen(a, "x");
+    int ay = query_citizen(a, "y");
+    int bx = query_citizen(b, "x");
+    int by = query_citizen(b, "y");
+    if (ax == bx && ay == by) { return 0; }
+    int v = query_citizen(a, "vision");
+    if (ay == by && axis_dist(ax, bx, W) <= v) { return 1; }
+    if (ax == bx && axis_dist(ay, by, H) <= v) { return 1; }
+    return 0;
+}
+
+void do_breeding() {
+    int cap = cfg_int("init_population");
+    int ids = citizen_ids();
+    int pop = sizeof(ids);
+    if (pop >= cap) { return; }
+    int amin = cfg_int("breed_age_min");
+    int amax = cfg_int("breed_age_max");
+    int dxs = ({1, -1, 0, 0});
+    int dys = ({0, 0, 1, -1});
+    for (int i = 0; i < sizeof(ids); i++) {
+        int a = ids[i];
+        if (!citizen_exists(a) || !query_citizen(a, "alive")) { continue; }
+        if (query_flag(a, "paired")) { continue; }
+        float wa = to_float(query_citizen(a, "wealth"));
+        int ma = query_citizen(a, "metabolism");
+        int aa = query_citizen(a, "age");
+        if (wa < to_float(ma) * 5.0) { continue; }
+        if (aa < amin || aa > amax) { continue; }
+        for (int j = i + 1; j < sizeof(ids); j++) {
+            int b = ids[j];
+            if (!citizen_exists(b) || !query_citizen(b, "alive")) { continue; }
+            if (query_flag(b, "paired")) { continue; }
+            float wb = to_float(query_citizen(b, "wealth"));
+            int mb = query_citizen(b, "metabolism");
+            int ab = query_citizen(b, "age");
+            if (wb < to_float(mb) * 5.0) { continue; }
+            if (ab < amin || ab > amax) { continue; }
+            // 双向可见：各自正交视野内
+            if (!in_vision(a, b)) { continue; }
+            if (!in_vision(b, a)) { continue; }
+            // 出生格：a/b 四邻未占格中离环面中点最近者（平局取先扫到的）
+            int ax = query_citizen(a, "x");
+            int ay = query_citizen(a, "y");
+            int bx = query_citizen(b, "x");
+            int by = query_citizen(b, "y");
+            int cands = ({});
+            for (int d = 0; d < 4; d++) {
+                int nax = wrap(ax + dxs[d], W);
+                int nay = wrap(ay + dys[d], H);
+                if (cell_empty(nax, nay) && member(nay * W + nax, cands) < 0) {
+                    cands = push(cands, nay * W + nax);
+                }
+                int nbx = wrap(bx + dxs[d], W);
+                int nby = wrap(by + dys[d], H);
+                if (cell_empty(nbx, nby) && member(nby * W + nbx, cands) < 0) {
+                    cands = push(cands, nby * W + nbx);
+                }
+            }
+            if (sizeof(cands) == 0) { continue; }
+            int mx = torus_mid_x(ax, bx);
+            int my = torus_mid_y(ay, by);
+            int best = cands[0];
+            int bd = torus_dist(best % W, best / W, mx, my);
+            for (int k = 1; k < sizeof(cands); k++) {
+                int d2 = torus_dist(cands[k] % W, cands[k] / W, mx, my);
+                if (d2 < bd) { best = cands[k]; bd = d2; }
+            }
+            int child = spawn_citizen(best % W, best / W);
+            // 出资：父母各出 30%
+            float ca = wa * 0.3;
+            float cb = wb * 0.3;
+            set_citizen(a, "wealth", wa - ca);
+            set_citizen(b, "wealth", wb - cb);
+            // 基因：父母均值 ± 变异，截断到合法区间
+            int va = query_citizen(a, "vision");
+            int vb = query_citizen(b, "vision");
+            int xa = query_citizen(a, "max_age");
+            int xb = query_citizen(b, "max_age");
+            int ga = query_citizen(a, "generation");
+            int gb = query_citizen(b, "generation");
+            set_citizen(child, "vision", clampi((va + vb) / 2 + random(3) - 1, 1, 6));
+            set_citizen(child, "metabolism", clampi((ma + mb) / 2 + random(3) - 1, 1, 4));
+            set_citizen(child, "max_age", clampi((xa + xb) / 2 + random(11) - 5, 60, 100));
+            set_citizen(child, "generation", max(ga, gb) + 1);
+            set_citizen(child, "wealth", ca + cb);
+            set_citizen(child, "age", 0);
+            set_citizen(child, "children", ({}));
+            set_citizen(child, "parents", ({a, b}));
+            set_citizen(child, "land", ({}));
+            set_citizen(child, "last_action", "born");
+            set_citizen(child, "last_rent", 0.0);
+            set_citizen(child, "total_harvest", 0.0);
+            set_citizen(child, "last_move_dist", 0);
+            // 子女登记到父母
+            int ac = query_citizen(a, "children");
+            int bc = query_citizen(b, "children");
+            set_citizen(a, "children", push(ac, child));
+            set_citizen(b, "children", push(bc, child));
+            set_citizen(a, "last_action", "bred");
+            set_citizen(b, "last_action", "bred");
+            set_flag(a, "paired", 1);
+            set_flag(b, "paired", 1);
+            emit_birth(a, b, child);
+            step_births++;
+            pop++;
+            if (pop >= cap) { return; }
+            break;
+        }
+    }
+}
+
+// --- 系统补人（repopulate_mode == "system"） ---
+
+void repopulate() {
+    int cap = cfg_int("init_population");
+    int pop = sizeof(citizen_ids());
+    // 全员死亡则不再补人（本地：仿真自然停止）
+    if (pop == 0) { return; }
+    while (pop < cap) {
+        int id = spawn_free();
+        if (id == 0) { break; }
+        step_injected = step_injected + to_float(query_citizen(id, "wealth"));
+        pop++;
+    }
+}
+
+// --- 统计上报：游戏指标由 mudlib 计算，经 emit_stat 合并入记分板 ---
+
+void report_stats() {
+    float total_sugar = 0.0;
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            total_sugar = total_sugar + query_cell(x, y, "sugar");
+        }
+    }
+    emit_stat("total_sugar", total_sugar);
+    emit_stat("death_by_age", to_float(deaths_by_age));
+    emit_stat("death_by_hunger", to_float(deaths_by_hunger));
+    emit_stat("growth", step_growth);
+    emit_stat("move_cost", step_move_cost);
+    emit_stat("rent_paid", step_rent);
+    emit_stat("injected_wealth", step_injected);
+    emit_stat("removed_wealth", step_removed);
+    emit_stat("released_wealth", step_released);
+    emit_stat("births", to_float(step_births));
+
+    int ids = citizen_ids();
+    int privacy = cfg_int("land_privacy_enabled");
+    float land_value = cfg_float("peak_capacity") * 2.0;
+    int assets = ({});
+    int incomes = ({});
+    float tv = 0.0;
+    float tm = 0.0;
+    float ta = 0.0;
+    int bull = 0;
+    int bear = 0;
+    float total_assets = 0.0;
+    for (int i = 0; i < sizeof(ids); i++) {
+        int id = ids[i];
+        if (!query_citizen(id, "alive")) { continue; }
+        float asset = to_float(query_citizen(id, "wealth"));
+        if (privacy) {
+            int land = query_citizen(id, "land");
+            asset = asset + to_float(sizeof(land)) * land_value;
+        }
+        assets = push(assets, asset);
+        incomes = push(incomes, to_float(query_citizen(id, "total_harvest")));
+        total_assets = total_assets + asset;
+        tv = tv + to_float(query_citizen(id, "vision"));
+        tm = tm + to_float(query_citizen(id, "metabolism"));
+        ta = ta + to_float(query_citizen(id, "age"));
+        if (query_citizen(id, "metabolism") >= 3) { bull++; } else { bear++; }
+    }
+    int n = sizeof(assets);
+    if (n == 0) { return; }
+    float nf = to_float(n);
+    emit_stat("avg_vision", tv / nf);
+    emit_stat("avg_metabolism", tm / nf);
+    emit_stat("avg_age", ta / nf);
+    emit_stat("avg_wealth", total_assets / nf);
+    emit_stat("bull_count", to_float(bull));
+    emit_stat("bear_count", to_float(bear));
+
+    // 财富基尼（含土地资产）与收入基尼（累计采集），与本地 get_stats 同公式
+    assets = sort_array(assets);
+    float sum = 0.0;
+    float tot = 0.0;
+    for (int i = 0; i < n; i++) {
+        sum = sum + to_float(i + 1) * to_float(assets[i]);
+        tot = tot + to_float(assets[i]);
+    }
+    float gini = 0.0;
+    if (n > 1 && tot > 0.0) {
+        gini = (2.0 * sum) / (nf * tot) - (nf + 1.0) / nf;
+        if (gini < 0.0) { gini = 0.0; }
+    }
+    emit_stat("gini_coefficient", gini);
+
+    incomes = sort_array(incomes);
+    float isum = 0.0;
+    float itot = 0.0;
+    for (int i = 0; i < n; i++) {
+        isum = isum + to_float(i + 1) * to_float(incomes[i]);
+        itot = itot + to_float(incomes[i]);
+    }
+    float income_gini = 0.0;
+    if (n > 1 && itot > 0.0) {
+        income_gini = (2.0 * isum) / (nf * itot) - (nf + 1.0) / nf;
+        if (income_gini < 0.0) { income_gini = 0.0; }
+    }
+    emit_stat("income_gini", income_gini);
+}
+
+// --- 主入口：内核每步调用一次 ---
+
+void heart_beat() {
+    W = grid_width();
+    H = grid_height();
+    step_growth = 0.0;
+    step_rent = 0.0;
+    step_move_cost = 0.0;
+    step_injected = 0.0;
+    step_removed = 0.0;
+    step_released = 0.0;
+    step_births = 0;
+    // 每步清零 last_rent（与本地 step 开头一致）
+    int ids0 = citizen_ids();
+    for (int i = 0; i < sizeof(ids0); i++) {
+        if (citizen_exists(ids0[i])) {
+            set_citizen(ids0[i], "last_rent", 0.0);
+        }
+    }
+    grow_all();
+    move_all();
+    do_trading();
+    reap();
+    if (query_config("repopulate_mode") == "breed") {
+        do_breeding();
+    }
+    if (query_config("repopulate_mode") == "system") {
+        repopulate();
+    }
+    report_stats();
+}

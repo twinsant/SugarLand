@@ -1,6 +1,8 @@
 extends Control
 
 const Simulation = preload("res://simulation.gd")
+const RemoteSimulation = preload("res://remote_simulation.gd")
+const LpcPanel = preload("res://lpc_panel.gd")
 const Resident = preload("res://resident.gd")
 const DeathMarker = preload("res://death_marker.gd")
 const HeartMarker = preload("res://heart_marker.gd")
@@ -20,7 +22,9 @@ const FOLLOW_SMOOTHNESS := 8.0
 const RECORDING_FPS := 30.0
 var step_seconds := 0.9
 
-var simulation := Simulation.new()
+var remote_mode := false
+var remote_url := ""
+var simulation: Simulation = _create_simulation()
 var display_sugar := PackedFloat32Array()
 var residents: Dictionary = {}
 var death_markers: Array[DeathMarker] = []
@@ -38,6 +42,7 @@ var recording_result := ""
 var recording_thread: Thread
 var recording_pending: Image
 var recording_saving := false
+var recording_stats_file: FileAccess
 var panning := false
 var following_selected := false
 var map_pan_target := Vector2.ZERO
@@ -50,6 +55,7 @@ var tutorial_action := "none"
 var tutorial_show_vision := false
 var next_death_select_richest := true
 var settings_panel: SettingsPanel
+var lpc_panel: LpcPanel
 
 @onready var map_clip: Control = $MapClip
 @onready var map_layer: Node2D = $MapClip/MapLayer
@@ -60,11 +66,14 @@ var settings_panel: SettingsPanel
 @onready var selection: RichTextLabel = %Selection
 @onready var pause_button: Button = %Pause
 @onready var record_button: Button = %Record
-@onready var settings_button: Button = %Settings
 @onready var recording_status: Label = %RecordingStatus
+@onready var settings_button: Button = %Settings
 @onready var zoom_status: Label = %ZoomStatus
 @onready var message_feed: Control = %SystemMessageFeed
 @onready var generation_palette = $GenerationPalette
+@onready var lpc_row: Control = $Sidebar/LPCRow
+@onready var lpc_status: Label = %LpcStatus
+@onready var subtitle: Label = $Subtitle
 var _feed_bg: ColorRect
 @onready var selected_death_message: Label = %SelectedDeathMessage
 
@@ -76,6 +85,26 @@ const MESSAGE_MAX := 5
 const MESSAGE_PADDING := 5.0
 var message_entries: Array[Dictionary] = []
 var selected_death_timer := 0.0
+var _reported_remote_error := ""
+
+
+func _create_simulation() -> Simulation:
+	var url := _server_url_from_args()
+	if url.is_empty():
+		return Simulation.new()
+	remote_mode = true
+	remote_url = url
+	return RemoteSimulation.new(url)
+
+
+func _server_url_from_args() -> String:
+	var args := OS.get_cmdline_user_args()
+	for i in args.size():
+		if args[i] == "--server" and i + 1 < args.size():
+			return args[i + 1]
+		if args[i].begins_with("--server="):
+			return args[i].substr("--server=".length())
+	return OS.get_environment("SUGARLAND_SERVER")
 
 
 func _ready() -> void:
@@ -84,6 +113,7 @@ func _ready() -> void:
 	theme = Theme.new()
 	theme.default_font = font
 	theme.default_font_size = 16
+	selection.add_theme_font_size_override("normal_font_size", 13)
 	var feed_bg := ColorRect.new()
 	feed_bg.color = Color(0.0, 0.0, 0.0, 0.45)
 	feed_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -95,7 +125,16 @@ func _ready() -> void:
 	%Step.pressed.connect(single_step)
 	record_button.pressed.connect(toggle_recording)
 	settings_button.pressed.connect(open_settings)
+	%Lpc.pressed.connect(open_lpc_panel)
+	lpc_row.visible = remote_mode
+	if remote_mode:
+		subtitle.text = "50 × 50 环面地图  /  远程 Go 服务 %s  /  LPC 驱动" % remote_url
 	generation_palette.swatch_clicked.connect(_on_swatch_clicked)
+	if OS.has_feature("web"):
+		record_button.visible = false
+		recording_status.visible = false
+		var footer: Label = get_node("Footer")
+		footer.text = "0视图复位 · 左键选择 · E接管/释放 · 方向键移动 · F迷雾 · 捏合缩放 · 双指平移"
 	reset()
 	start_tutorial()
 
@@ -131,6 +170,9 @@ func reset() -> void:
 
 func start_tutorial() -> void:
 	game_started = true
+	if simulation.citizens.is_empty():
+		update_panel()
+		return
 	tutorial_mode = true
 	set_running(false)
 	var guide_resident: Resident = residents[simulation.citizens[0].id]
@@ -205,8 +247,11 @@ func finish_tutorial() -> void:
 
 
 func advance() -> void:
+	if simulation.citizens.is_empty():
+		return
 	var selected_before := selected_citizen
 	simulation.step()
+	_record_stats_line()
 	var selected_died := selected_before != null and not simulation.citizens.has(selected_before) and not selected_before.death_reason.is_empty()
 	if selected_died:
 		select_extreme_citizen(next_death_select_richest)
@@ -266,6 +311,7 @@ func show_death_messages(selected_dead: Simulation.Citizen = null) -> void:
 			selected_death_message.text = text
 			selected_death_message.add_theme_color_override("font_color", color)
 			selected_death_message.modulate.a = 1.0
+			selected_death_message.visible = true
 			selected_death_timer = MESSAGE_LIFETIME
 		else:
 			var color := Color(0.55, 0.85, 0.55, 1) if death["reason"] == "age" else Color(0.95, 0.84, 0.55, 1)
@@ -339,6 +385,7 @@ func update_system_message(delta: float) -> void:
 		if selected_death_timer <= 0.0:
 			selected_death_timer = 0.0
 			selected_death_message.text = ""
+			selected_death_message.visible = false
 		else:
 			var alpha: float = clampf(selected_death_timer / MESSAGE_FADE_TIME, 0.0, 1.0)
 			selected_death_message.modulate.a = alpha
@@ -387,6 +434,17 @@ func update_map_layer() -> void:
 	map_layer.set("display_sugar", display_sugar)
 	map_layer.set("selected_cell", selected_cell)
 	map_layer.set("tutorial_action", tutorial_action)
+	map_layer.set("land_owners", simulation.land_owners)
+	var owner_colors := {}
+	for owner_id in simulation.land_owners.values():
+		var owner: Simulation.Citizen = null
+		for c in simulation.citizens:
+			if c.id == owner_id:
+				owner = c
+				break
+		if owner != null:
+			owner_colors[owner_id] = Resident.GENERATION_COLORS[owner.generation % 10]
+	map_layer.set("owner_colors", owner_colors)
 	map_layer.queue_redraw()
 
 
@@ -423,6 +481,8 @@ func update_zoom_status() -> void:
 func update_selected_follow(delta: float) -> void:
 	if selected_citizen == null:
 		return
+	if map_layer.scale == Vector2.ONE:
+		return
 	var resident: Resident = residents.get(selected_citizen.id)
 	if resident == null:
 		return
@@ -435,6 +495,7 @@ func update_selected_follow(delta: float) -> void:
 	map_pan_target = map_clip.size * 0.5 - resident.position * map_layer.scale.x
 	var blend := 1.0 - exp(-FOLLOW_SMOOTHNESS * delta)
 	map_layer.position = map_layer.position.lerp(map_pan_target, blend)
+	_clamp_map_position()
 
 
 func zoom_at(global_point: Vector2, factor: float) -> void:
@@ -446,6 +507,7 @@ func zoom_at(global_point: Vector2, factor: float) -> void:
 	update_zoom_status()
 	var after := map_layer.to_local(global_point)
 	map_layer.position += (after - before) * next_zoom
+	_clamp_map_position()
 
 
 func toggle_user_control() -> void:
@@ -488,7 +550,24 @@ func apply_settings() -> void:
 	reset()
 
 
+func open_lpc_panel() -> void:
+	if not remote_mode:
+		return
+	if lpc_panel != null and is_instance_valid(lpc_panel):
+		lpc_panel.queue_free()
+		return
+	var was_running := running
+	set_running(false)
+	lpc_panel = LpcPanel.new()
+	lpc_panel.world = self
+	lpc_panel.closed.connect(func(): set_running(was_running))
+	add_child(lpc_panel)
+	lpc_panel.move_to_front()
+
+
 func toggle_recording() -> void:
+	if OS.has_feature("web"):
+		return
 	recording = not recording
 	if recording:
 		var session_name := "session_%d" % Time.get_ticks_msec()
@@ -502,15 +581,30 @@ func toggle_recording() -> void:
 		recording_elapsed = 0.0
 		recording_frame = 0
 		recording_result = ""
+		recording_stats_file = FileAccess.open(mp4_dir + "/stats.jsonl", FileAccess.WRITE)
 		record_button.text = "停止录像 [V]"
 		capture_frame()
 	else:
-		record_button.text = "开始录像 [V]"
+		record_button.text = "录像 [V]"
 		finish_recording()
 	update_recording_status()
 
 
+func _record_stats_line() -> void:
+	if recording_stats_file == null:
+		return
+	var stats := simulation.get_stats()
+	stats["tick"] = simulation.tick
+	stats["deaths"] = simulation.death_events
+	stats["breedings"] = simulation.breeding_events
+	recording_stats_file.store_line(JSON.stringify(stats))
+	recording_stats_file.flush()
+
+
 func finish_recording() -> void:
+	if recording_stats_file != null:
+		recording_stats_file.close()
+		recording_stats_file = null
 	if recording_saving and recording_thread != null:
 		recording_thread.wait_to_finish()
 		recording_thread = null
@@ -578,10 +672,13 @@ func _process(delta: float) -> void:
 			recording_frame += 1
 			update_recording_status()
 	if running:
-		elapsed += delta
-		if elapsed >= step_seconds:
-			elapsed = fmod(elapsed, step_seconds)
-			advance()
+		if simulation.citizens.is_empty():
+			set_running(false)
+		else:
+			elapsed += delta
+			if elapsed >= step_seconds:
+				elapsed = fmod(elapsed, step_seconds)
+				advance()
 	update_selected_follow(delta)
 	update_fog_layer()
 	update_system_message(delta)
@@ -594,11 +691,11 @@ func _process(delta: float) -> void:
 
 func update_recording_status() -> void:
 	if recording:
-		recording_status.text = "录像中 · %d 帧" % recording_frame
+		recording_status.text = "录制中 · %d 帧" % recording_frame
 	elif not recording_result.is_empty():
 		recording_status.text = recording_result
 	else:
-		recording_status.text = "录像：未开始"
+		recording_status.text = ""
 
 
 func toggle_pause() -> void:
@@ -664,8 +761,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventPanGesture:
-		pan_map(-event.delta * TRACKPAD_PAN_SENSITIVITY)
-		get_viewport().set_input_as_handled()
+		if map_layer.scale.x > 1.0 and map_clip.get_global_rect().has_point(event.position):
+			pan_map(-event.delta * TRACKPAD_PAN_SENSITIVITY)
+			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseButton:
 		if event.button_index in [MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT]:
@@ -686,8 +784,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
+func _clamp_map_position() -> void:
+	var scale := map_layer.scale.x
+	var clip_rect := Rect2(Vector2.ZERO, map_clip.size)
+	var left := clip_rect.position.x - MAP_ORIGIN.x * scale
+	var right := clip_rect.end.x - (MAP_ORIGIN.x + MAP_SIZE) * scale
+	var top := clip_rect.position.y - MAP_ORIGIN.y * scale
+	var bottom := clip_rect.end.y - (MAP_ORIGIN.y + MAP_SIZE) * scale
+	var min_pos := Vector2(minf(left, right), minf(top, bottom))
+	var max_pos := Vector2(maxf(left, right), maxf(top, bottom))
+	map_layer.position = map_layer.position.clamp(min_pos, max_pos)
+
+
 func pan_map(delta: Vector2) -> void:
 	map_layer.position += delta
+	_clamp_map_position()
 	map_pan_target = map_layer.position
 	following_selected = false
 
@@ -700,11 +811,44 @@ func thought_for(citizen: Simulation.Citizen) -> String:
 			var raw := citizen.cell + direction * distance
 			var cell := Vector2i(posmod(raw.x, GRID_SIZE), posmod(raw.y, GRID_SIZE))
 			best_sugar = maxf(best_sugar, simulation.sugar[cell.y * GRID_SIZE + cell.x])
-	var thought := "附近没有糖，继续寻找"
-	if citizen.wealth <= citizen.metabolism * 2:
-		thought = "我需要糖！"
-	elif citizen.wealth >= citizen.metabolism * 25.0:
-		if simulation.repopulate_mode == "breed" and citizen.age >= simulation.breed_age_min and citizen.age <= simulation.breed_age_max:
+	var thought := ""
+	match citizen.last_action:
+		"bought":
+			thought = "买了地，我是地主"
+		"inherited":
+			thought = "继承了土地"
+		"bred":
+			thought = "生了孩子"
+		"born":
+			thought = "我出生了"
+		"rent_paid":
+			thought = "交租给地主"
+		"wander":
+			thought = "财富自由，到处逛逛"
+		"seek":
+			thought = "去找更肥的糖田"
+		"stay":
+			thought = "原地不动，先采集"
+		_:
+			pass
+	if thought.is_empty():
+		if citizen.last_rent > 0.0:
+			thought = "躺着收租"
+		elif citizen.wealth <= citizen.metabolism * 2:
+			thought = "我需要糖！"
+		elif citizen.wealth >= citizen.metabolism * 25.0:
+			if simulation.repopulate_mode == "breed" and citizen.age >= simulation.breed_age_min and citizen.age <= simulation.breed_age_max:
+				var has_partner := false
+				for other in simulation.citizens:
+					if other.id != citizen.id and other.death_reason.is_empty() and other.wealth >= other.metabolism * 5.0:
+						if other.age >= simulation.breed_age_min and other.age <= simulation.breed_age_max:
+							if simulation._in_vision(citizen, other) and simulation._in_vision(other, citizen):
+								has_partner = true
+								break
+				thought = "看到Ta了，想生个孩子" if has_partner else "财富自由，想找个伴侣"
+			else:
+				thought = "财富自由，到处逛逛"
+		elif simulation.repopulate_mode == "breed" and citizen.wealth >= citizen.metabolism * 5.0 and citizen.age >= simulation.breed_age_min and citizen.age <= simulation.breed_age_max:
 			var has_partner := false
 			for other in simulation.citizens:
 				if other.id != citizen.id and other.death_reason.is_empty() and other.wealth >= other.metabolism * 5.0:
@@ -712,22 +856,15 @@ func thought_for(citizen: Simulation.Citizen) -> String:
 						if simulation._in_vision(citizen, other) and simulation._in_vision(other, citizen):
 							has_partner = true
 							break
-			thought = "看到Ta了，想生个孩子" if has_partner else "财富自由，想找个伴侣"
+			thought = "想找个好伴侣" if not has_partner else "看到Ta了，想生个孩子"
+		elif best_sugar > current_sugar + 0.1:
+			thought = "去找更肥的糖田"
+		elif current_sugar > 0.1:
+			thought = "这里还有糖，先采集"
 		else:
-			thought = "财富自由，到处逛逛"
-	elif simulation.repopulate_mode == "breed" and citizen.wealth >= citizen.metabolism * 5.0 and citizen.age >= simulation.breed_age_min and citizen.age <= simulation.breed_age_max:
-		var has_partner := false
-		for other in simulation.citizens:
-			if other.id != citizen.id and other.death_reason.is_empty() and other.wealth >= other.metabolism * 5.0:
-				if other.age >= simulation.breed_age_min and other.age <= simulation.breed_age_max:
-					if simulation._in_vision(citizen, other) and simulation._in_vision(other, citizen):
-						has_partner = true
-						break
-		thought = "想找个好伴侣" if not has_partner else "看到Ta了，想生个孩子"
-	elif best_sugar > current_sugar + 0.1:
-		thought = "去找更肥的糖田"
-	elif current_sugar > 0.1:
-		thought = "这里还有糖，先采集"
+			thought = "附近没有糖，继续寻找"
+	if citizen.last_rent > 0.0 and not thought.contains("收租"):
+		thought += " · 收租 +%.1f" % citizen.last_rent
 	return "居民 #%03d\n%s" % [citizen.id, thought]
 
 
@@ -764,13 +901,31 @@ func select_at(global_point: Vector2) -> void:
 
 func update_panel() -> void:
 	var stats := simulation.get_stats()
-	status.text = "糖域纪年 %03d 年  /  %s" % [simulation.tick, "运行中" if running else "已暂停"]
+	var state_text := "运行中" if running else "已暂停"
+	if remote_mode:
+		if simulation.connected:
+			state_text += " · 远程"
+		else:
+			state_text = "连接失败 · " + simulation.last_error
+	status.text = "糖域纪年 %03d 年  /  %s" % [simulation.tick, state_text]
+	if remote_mode:
+		if simulation.last_error != _reported_remote_error:
+			_reported_remote_error = simulation.last_error
+			if not _reported_remote_error.is_empty():
+				add_message("服务请求失败 · " + _reported_remote_error, Color(0.95, 0.6, 0.55, 1))
+		var scripted := 0
+		for citizen in simulation.citizens:
+			if citizen.has_lpc:
+				scripted += 1
+		lpc_status.text = "居民脚本 %d · 世界 %s" % [scripted, "已挂接" if simulation.world_agent_attached() else "未挂接"]
 	update_recording_status()
 	var repopulate_text := "累计补入 %d" % simulation.replacements if simulation.repopulate_mode == "system" else "累计繁殖 %d" % simulation.bred
-	economy.text = "人口 %d · %s\n总财富 %.1f · 人均 %.1f\n财富基尼 %.3f · 地图存糖 %.1f\n本轮采集 %.1f · 代谢 %.1f · 移动 %.1f\n死亡释放 %.1f · 累计死亡：饥饿 %d / 寿终 %d" % [
-		stats.population, repopulate_text, stats.total_wealth, stats.mean_wealth,
-		stats.gini, stats.land_sugar, stats.harvested, stats.consumed, stats.move_cost, stats.released_wealth,
+	var birth_rate: float = stats.births / maxf(float(stats.population), 1.0) * 100.0
+	economy.text = "人口 %d · %s · 出生率 %.1f%%\n总财富 %.1f · 人均 %.1f\n财富基尼 %.3f (峰值 %.3f)\n收入基尼 %.3f (峰值 %.3f)\n本轮采集 %.1f · 代谢 %.1f · 移动 %.1f\n死亡释放 %.1f · 累计死亡：饥饿 %d / 寿终 %d%s" % [
+		stats.population, repopulate_text, birth_rate, stats.total_wealth, stats.mean_wealth,
+		stats.gini, simulation.peak_gini, stats.income_gini, simulation.peak_income_gini, stats.harvested, stats.consumed, stats.move_cost, stats.released_wealth,
 		simulation.starved, simulation.aged_out,
+		"\n租金 %.1f · 私有地块 %d · 租金率 %d%%" % [stats.rent_paid, simulation.land_owners.size(), roundi(simulation.rent_rate * 100.0)] if simulation.land_privacy_enabled else "",
 	]
 	_update_generation_palette()
 	if selected_cell.x < 0:
@@ -780,15 +935,31 @@ func update_panel() -> void:
 	var cell_info := "坐标 (%d, %d) · 糖 %.2f / %.2f" % [
 		selected_cell.x, selected_cell.y, simulation.sugar[index], simulation.capacities[index],
 	]
+	var land_info := ""
+	if simulation.land_privacy_enabled:
+		var owner_id := simulation.get_land_owner(selected_cell)
+		if owner_id >= 0:
+			if selected_citizen != null and owner_id == selected_citizen.id:
+				land_info = "\n土地：自有"
+			else:
+				land_info = "\n土地：地主 #%03d" % owner_id
+		else:
+			land_info = "\n土地：无主"
 	if selected_citizen == null:
-		selection.text = "资源格子\n%s\n每轮再生 1，直至达到容量。" % cell_info
+		selection.text = "资源格子\n%s%s\n每轮再生 1，直至达到容量。" % [cell_info, land_info]
 	elif not selected_citizen.death_reason.is_empty():
 		var reason := "饥饿" if selected_citizen.death_reason == "starvation" else "寿终"
 		selection.text = "居民 #%03d · 已%s\n年龄 %d · 最后财富 %.2f\n新居民已补入，可重新选择。" % [
 			selected_citizen.id, reason, selected_citizen.age, selected_citizen.wealth,
 		]
 	else:
-		var control_text := "用户接管中 · 方向键移动" if manual_controlled else "自动行动 · 按 E 接管"
+		var control_text := "自动行动 · 按 E 接管"
+		if manual_controlled:
+			control_text = "用户接管中 · 方向键移动"
+		elif selected_citizen.is_agent_controlled:
+			control_text = "Agent 接管中"
+		elif selected_citizen.has_lpc:
+			control_text = "LPC 脚本驱动"
 		var parents_text := "无"
 		if not selected_citizen.parents.is_empty():
 			var parts: Array[String] = []
@@ -801,10 +972,14 @@ func update_panel() -> void:
 				var color := "green" if alive else "yellow"
 				parts.append("[color=%s]#%03d[/color]" % [color, parent_id])
 			parents_text = ", ".join(parts)
-		selection.text = "居民 #%03d · 第 %d 代 · %s\n%s\n财富 %.2f · 本轮采集 %.2f\n代谢 %d / 轮 · 视野 %d 格\n年龄 %d / %d 轮\n父母：%s · 孩子 %d" % [
-			selected_citizen.id, selected_citizen.generation, control_text, cell_info, selected_citizen.wealth, selected_citizen.last_harvest,
+		var owned_count := 0
+		for cell_key in simulation.land_owners.keys():
+			if simulation.land_owners[cell_key] == selected_citizen.id:
+				owned_count += 1
+		selection.text = "居民 #%03d · 第 %d 代 · %s\n%s%s\n财富 %.2f · 本轮采集 %.2f · 收租 %.2f\n代谢 %d / 轮 · 视野 %d 格\n年龄 %d / %d 轮\n父母：%s · 孩子 %d · 拥地 %d" % [
+			selected_citizen.id, selected_citizen.generation, control_text, cell_info, land_info, selected_citizen.wealth, selected_citizen.last_harvest, selected_citizen.last_rent,
 			selected_citizen.metabolism, selected_citizen.vision, selected_citizen.age, selected_citizen.max_age,
-			parents_text, selected_citizen.children.size(),
+			parents_text, selected_citizen.children.size(), owned_count,
 		]
 
 

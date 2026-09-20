@@ -13,40 +13,44 @@ const (
 
 	// 字面量
 	TokenInt    // 123
+	TokenFloat  // 1.5
 	TokenString // "hello"
 	TokenIdent  // foo, bar
 
 	// 关键字
-	TokenIntType   // int
+	TokenIntType    // int
+	TokenFloatType  // float
 	TokenStringType // string
-	TokenVoid      // void
-	TokenIf        // if
-	TokenElse      // else
-	TokenFor       // for
-	TokenWhile     // while
-	TokenReturn    // return
-	TokenInherit   // inherit
-	TokenObject    // object
-	TokenThis      // this
+	TokenVoid       // void
+	TokenIf         // if
+	TokenElse       // else
+	TokenFor        // for
+	TokenWhile      // while
+	TokenReturn     // return
+	TokenBreak      // break
+	TokenContinue   // continue
+	TokenInherit    // inherit
+	TokenObject     // object
+	TokenThis       // this
 
 	// 运算符
-	TokenPlus     // +
-	TokenMinus    // -
-	TokenStar     // *
-	TokenSlash    // /
-	TokenPercent  // %
-	TokenAssign   // =
-	TokenEq       // ==
-	TokenNeq      // !=
-	TokenLt       // <
-	TokenGt       // >
-	TokenLe       // <=
-	TokenGe       // >=
-	TokenAnd      // &&
-	TokenOr       // ||
-	TokenNot      // !
-	TokenInc      // ++
-	TokenDec      // --
+	TokenPlus    // +
+	TokenMinus   // -
+	TokenStar    // *
+	TokenSlash   // /
+	TokenPercent // %
+	TokenAssign  // =
+	TokenEq      // ==
+	TokenNeq     // !=
+	TokenLt      // <
+	TokenGt      // >
+	TokenLe      // <=
+	TokenGe      // >=
+	TokenAnd     // &&
+	TokenOr      // ||
+	TokenNot     // !
+	TokenInc     // ++
+	TokenDec     // --
 
 	// 分隔符
 	TokenLParen    // (
@@ -76,17 +80,20 @@ func (t Token) String() string {
 
 // keywords 是关键字到 TokenType 的映射
 var keywords = map[string]TokenType{
-	"int":     TokenIntType,
-	"string":  TokenStringType,
-	"void":    TokenVoid,
-	"if":      TokenIf,
-	"else":    TokenElse,
-	"for":     TokenFor,
-	"while":   TokenWhile,
-	"return":  TokenReturn,
-	"inherit": TokenInherit,
-	"object":  TokenObject,
-	"this":    TokenThis,
+	"int":      TokenIntType,
+	"float":    TokenFloatType,
+	"string":   TokenStringType,
+	"void":     TokenVoid,
+	"if":       TokenIf,
+	"else":     TokenElse,
+	"for":      TokenFor,
+	"while":    TokenWhile,
+	"return":   TokenReturn,
+	"break":    TokenBreak,
+	"continue": TokenContinue,
+	"inherit":  TokenInherit,
+	"object":   TokenObject,
+	"this":     TokenThis,
 }
 
 // LookupIdent 查找标识符是否为关键字

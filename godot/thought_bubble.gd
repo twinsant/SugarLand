@@ -63,7 +63,7 @@ func update_placement() -> void:
 
 func show_thought(text: String) -> void:
 	has_title = false
-	width = 116.0
+	width = 128.0
 	padding = 6.0
 	font_size = 12
 	if body_label != null:

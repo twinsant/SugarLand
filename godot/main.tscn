@@ -3,7 +3,18 @@
 [ext_resource type="Script" uid="uid://qcjmm3rt2ff8" path="res://world.gd" id="1"]
 [ext_resource type="Script" uid="uid://bumj58or2w0nl" path="res://map_layer.gd" id="2"]
 [ext_resource type="Script" uid="uid://ep7aans1wvi1" path="res://fog_layer.gd" id="3"]
-[ext_resource type="Script" path="res://generation_palette.gd" id="4"]
+[ext_resource type="Script" uid="uid://b0duncw651v4a" path="res://generation_palette.gd" id="4"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_4jkdq"]
+content_margin_left = 5.0
+content_margin_top = 2.0
+content_margin_right = 5.0
+content_margin_bottom = 2.0
+bg_color = Color(0, 0, 0, 0.45)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
 
 [node name="SugarLand" type="Control" unique_id=530531428]
 layout_mode = 3
@@ -111,12 +122,24 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "设置"
 
-[node name="RecordingStatus" type="Label" parent="Sidebar" unique_id=1799317079]
+[node name="LPCRow" type="HBoxContainer" parent="Sidebar" unique_id=-992948422]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Lpc" type="Button" parent="Sidebar/LPCRow" unique_id=1066035174]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "LPC 脚本"
+
+[node name="LpcStatus" type="Label" parent="Sidebar/LPCRow" unique_id=1611105774]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_colors/font_color = Color(0.44, 0.72, 0.78, 1)
-text = "录像：未开始"
-autowrap_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.58, 0.77, 0.8, 1)
+theme_override_font_sizes/font_size = 13
+vertical_alignment = 1
 
 [node name="Separator" type="HSeparator" parent="Sidebar" unique_id=795424738]
 layout_mode = 2
@@ -125,9 +148,9 @@ layout_mode = 2
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 160)
 layout_mode = 2
+bbcode_enabled = true
 text = "点击居民或格子查看详情"
 autowrap_mode = 2
-bbcode_enabled = true
 
 [node name="Legend" type="Label" parent="Sidebar" unique_id=490002673]
 layout_mode = 2
@@ -139,9 +162,9 @@ text = "地形 沙漠黄 → 森林绿：当前糖量
 [node name="Note" type="Label" parent="Sidebar" unique_id=1430407709]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.49, 0.61, 0.65, 1)
-text = "生长 → 择地采集 → 代谢 → 死亡补入
-死亡后补足 80 人，新人自带启动糖。
-纯本地单资源模型，无交易或繁殖。"
+text = "生长 → 择地采集 → 代谢/移动 → 死亡
+系统模式补足 80 人，繁殖模式自然生育
+支持土地私有、继承、租金与财富/收入基尼"
 autowrap_mode = 2
 
 [node name="ZoomStatus" type="Label" parent="." unique_id=1397820841]
@@ -162,7 +185,7 @@ offset_top = 800.0
 offset_right = 1120.0
 offset_bottom = 832.0
 theme_override_colors/font_color = Color(0.5, 0.64, 0.68, 1)
-text = "左键选择   /   E接管   /   方向键移动   /   F迷雾   /   滚轮或触控板缩放   /   V录像"
+text = "0视图复位 · 左键选择 · E接管/释放 · 方向键移动 · F迷雾 · 捏合缩放 · 双指平移 · V录像"
 
 [node name="SystemMessageFeed" type="Control" parent="." unique_id=979227921]
 unique_name_in_owner = true
@@ -175,6 +198,7 @@ mouse_filter = 2
 
 [node name="SelectedDeathMessage" type="Label" parent="." unique_id=173527106]
 unique_name_in_owner = true
+visible = false
 layout_mode = 0
 offset_left = 420.0
 offset_top = 676.0
@@ -182,9 +206,10 @@ offset_right = 740.0
 offset_bottom = 704.0
 theme_override_colors/font_color = Color(0.95, 0.84, 0.55, 1)
 theme_override_font_sizes/font_size = 14
+theme_override_styles/normal = SubResource("StyleBoxFlat_4jkdq")
 horizontal_alignment = 2
 
-[node name="GenerationPalette" type="HBoxContainer" parent="."]
+[node name="GenerationPalette" type="HBoxContainer" parent="." unique_id=1482986454]
 layout_mode = 0
 offset_left = 36.0
 offset_top = 712.0
@@ -192,3 +217,13 @@ offset_right = 320.0
 offset_bottom = 758.0
 theme_override_constants/separation = 2
 script = ExtResource("4")
+
+[node name="RecordingStatus" type="Label" parent="." unique_id=1448379810]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 340.0
+offset_top = 712.0
+offset_right = 740.0
+offset_bottom = 758.0
+theme_override_colors/font_color = Color(0.58, 0.77, 0.8, 1)
+horizontal_alignment = 2

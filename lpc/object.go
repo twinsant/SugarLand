@@ -4,13 +4,13 @@ import "fmt"
 
 // Object 表示 LPC 运行时对象
 type Object struct {
-	ID         string                 `json:"id"`
-	Name       string                 `json:"name"`
-	Properties map[string]Value       `json:"-"`
+	ID         string                   `json:"id"`
+	Name       string                   `json:"name"`
+	Properties map[string]Value         `json:"-"`
 	Methods    map[string]*FunctionDecl `json:"-"`
-	Parent     *Object                `json:"-"` // 继承链
-	Program    *ProgramAST            `json:"-"`
-	VM         *VM                    `json:"-"`
+	Parent     *Object                  `json:"-"` // 继承链
+	Program    *ProgramAST              `json:"-"`
+	VM         *VM                      `json:"-"`
 }
 
 // NewObject 创建新的 LPC 对象
@@ -61,13 +61,8 @@ func (o *Object) LoadProgram(prog *ProgramAST) {
 		o.Methods[name] = fn
 	}
 
-	// 注册默认 efun
-	o.VM.RegisterEfun("write", func(args []Value) Value {
-		if len(args) > 0 {
-			o.VM.Out = append(o.VM.Out, args[0].String())
-		}
-		return Null()
-	})
+	// 注册默认 efun 库（write、sizeof、abs、to_int 等）
+	o.VM.RegisterDefaultEfuns()
 }
 
 // CallMethod 调用对象方法

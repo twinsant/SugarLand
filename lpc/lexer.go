@@ -2,11 +2,11 @@ package lpc
 
 // Lexer 词法分析器，将源代码分解为 Token 序列
 type Lexer struct {
-	input  string
-	pos    int  // 当前字符位置
-	line   int  // 当前行号
-	col    int  // 当前列号
-	ch     byte // 当前字符
+	input string
+	pos   int  // 当前字符位置
+	line  int  // 当前行号
+	col   int  // 当前列号
+	ch    byte // 当前字符
 }
 
 // NewLexer 创建一个新的词法分析器
@@ -92,13 +92,22 @@ func (l *Lexer) readString() string {
 	return s
 }
 
-// readInt 读取整数字面量
-func (l *Lexer) readInt() string {
+// readNumber 读取数字字面量，返回字面量和是否为浮点数
+func (l *Lexer) readNumber() (string, bool) {
 	start := l.pos - 1
 	for l.ch >= '0' && l.ch <= '9' {
 		l.advance()
 	}
-	return l.input[start : l.pos-1]
+	isFloat := false
+	// 小数点后必须紧跟数字才算浮点（避免 1.foo 之类误解析）
+	if l.ch == '.' && l.peek() >= '0' && l.peek() <= '9' {
+		isFloat = true
+		l.advance() // skip .
+		for l.ch >= '0' && l.ch <= '9' {
+			l.advance()
+		}
+	}
+	return l.input[start : l.pos-1], isFloat
 }
 
 // readIdent 读取标识符或关键字
@@ -157,10 +166,15 @@ func (l *Lexer) NextToken() Token {
 		return tok
 	}
 
-	// 整数
+	// 数字（整数或浮点）
 	if ch >= '0' && ch <= '9' {
-		tok.Type = TokenInt
-		tok.Literal = l.readInt()
+		literal, isFloat := l.readNumber()
+		if isFloat {
+			tok.Type = TokenFloat
+		} else {
+			tok.Type = TokenInt
+		}
+		tok.Literal = literal
 		return tok
 	}
 

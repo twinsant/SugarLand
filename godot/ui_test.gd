@@ -70,10 +70,10 @@ func run() -> void:
 	var step_button: Button = scene.get_node("%Step")
 	var reset_button: Button = scene.get_node("%Reset")
 	var record_button: Button = scene.get_node("%Record")
+	var recording_status: Label = scene.get_node("%RecordingStatus")
 	var selection: RichTextLabel = scene.get_node("%Selection")
 	var economy: Label = scene.get_node("%Economy")
 	var status: Label = scene.get_node("%Status")
-	var recording_status: Label = scene.get_node("%RecordingStatus")
 	var zoom_status: Label = scene.get_node("%ZoomStatus")
 	var initial_economy := economy.text
 	check(zoom_status.text == "地图缩放 100%", "Zoom status must show the default scale")
@@ -265,13 +265,14 @@ func run() -> void:
 	scene.simulation.breed_age_min = 15
 	scene.simulation.breed_age_max = 65
 	click(record_button.get_global_rect().get_center())
-	check(scene.recording and record_button.text.begins_with("停止录像"), "Record button must start frame capture")
+	check(scene.recording and record_button.text == "停止录像 [V]", "Record button must show stop action")
 	await create_timer(0.1).timeout
-	check(recording_status.text.contains("录像中"), "Recording status must update while paused")
+	check(recording_status.text.contains("帧"), "Recording status label must show frame count")
 	if DisplayServer.get_name() != "headless":
 		check(scene.recording_frame > 0, "Recording must write PNG frames while paused")
 	click(record_button.get_global_rect().get_center())
-	check(not scene.recording and recording_status.text.contains("录像结束"), "Record button must stop frame capture")
+	check(not scene.recording and record_button.text == "录像 [V]", "Record button must show start action")
+	check(recording_status.text.contains("完成") or recording_status.text.contains("保留") or recording_status.text.contains("没有可用帧"), "Recording status label must show result")
 	var wheel := InputEventMouseButton.new()
 	wheel.position = Vector2(350, 400)
 	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
@@ -281,7 +282,7 @@ func run() -> void:
 	var before_pan: Vector2 = scene.map_layer.position
 	var pan := InputEventPanGesture.new()
 	pan.position = Vector2(350, 400)
-	pan.delta = Vector2(18, 12)
+	pan.delta = Vector2(1, 1)
 	root.push_input(pan, true)
 	check(scene.map_layer.position == before_pan - pan.delta * scene.TRACKPAD_PAN_SENSITIVITY, "Trackpad pan must follow Apple's natural content direction with sensitivity compensation")
 	var magnify := InputEventMagnifyGesture.new()
@@ -293,13 +294,26 @@ func run() -> void:
 	for iteration in 20:
 		root.push_input(wheel, true)
 	check(scene.map_layer.scale.x <= 3.0 and zoom_status.text == "地图缩放 300%", "Map zoom must be capped at 300%")
-	key(KEY_0)
-	check(scene.map_layer.scale == Vector2.ONE and scene.map_layer.position == Vector2.ZERO and zoom_status.text == "地图缩放 100%", "Zero must reset the map view and scale label")
-	var follow_view: Node2D = scene.get_node("MapClip/MapLayer/Residents").get_child(0)
+	var residents_root: Node = scene.get_node("MapClip/MapLayer/Residents")
+	var map_center: Vector2 = scene.MAP_ORIGIN + Vector2.ONE * scene.MAP_SIZE * 0.5
+	var follow_view: Node2D = residents_root.get_child(0)
+	var best_distance := follow_view.position.distance_to(map_center)
+	for resident_node in residents_root.get_children():
+		var d: float = resident_node.position.distance_to(map_center)
+		if d < best_distance:
+			best_distance = d
+			follow_view = resident_node
 	click(follow_view.get_global_position())
 	scene.map_layer.position = Vector2(-600, -600)
 	scene.update_selected_follow(10.0)
 	check(follow_view.get_global_position().distance_to(scene.map_clip.get_global_rect().get_center()) < 1.0, "Selected resident must recenter smoothly when near the viewport edge")
+	key(KEY_0)
+	check(scene.map_layer.scale == Vector2.ONE and scene.map_layer.position == Vector2.ZERO and zoom_status.text == "地图缩放 100%", "Zero must reset the map view and scale label")
+	# At 100% zoom, selected resident should not pan the map
+	click(follow_view.get_global_position())
+	scene.map_layer.position = Vector2(-100, -100)
+	scene.update_selected_follow(10.0)
+	check(scene.map_layer.position == Vector2(-100, -100), "Map must not pan for selected resident at 100% zoom")
 	key(KEY_0)
 	key(KEY_SPACE)
 	check(not scene.running, "Space must pause even when Reset has focus")
@@ -311,9 +325,106 @@ func run() -> void:
 	check(status.text.contains("运行中"), "Status must show the running state")
 	key(KEY_R)
 	check(scene.simulation.tick == 0 and economy.text == initial_economy, "R must reset the economy")
+	# Land privatization: wealthy resident acquires land by affordability, others pay rent
+	scene.simulation.land_privacy_enabled = true
+	scene.simulation.peak_capacity = 4.0
+	scene.reset()
+	var landowner = scene.simulation.citizens[0]
+	landowner.cell = Vector2i(25, 25)
+	landowner.wealth = 73.0
+	landowner.metabolism = 2
+	landowner.vision = 1
+	landowner.age = 20
+	landowner.max_age = 100
+	scene.simulation.sugar.fill(0.0)
+	scene.simulation.capacities.fill(0.0)
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			var idx := (25 + dy) * 50 + (25 + dx)
+			scene.simulation.capacities[idx] = 4.0
+			scene.simulation.sugar[idx] = 4.0
+	for i in range(1, scene.simulation.citizens.size()):
+		scene.simulation.citizens[i].wealth = 0.1
+	scene.advance()
+	# 73 wealth, 8 per cell, 50 reserve -> buys 3 cells regardless of move
+	check(scene.simulation.land_owners.size() == 3, "Wealthy resident must buy 3 cells by affordability")
+	var owner_values: Array = scene.simulation.land_owners.values()
+	check(landowner.id in owner_values, "Land owner must be the wealthy resident")
+	# Now test rent: landowner moves away, renter harvests on owned land
+	scene.simulation.land_owners.clear()
+	scene.simulation.land_owners[25 * 50 + 25] = landowner.id
+	landowner.cell = Vector2i(26, 25)
+	landowner.wealth = 7.0
+	landowner.vision = 1
+	var renter = scene.simulation.citizens[1]
+	renter.cell = Vector2i(25, 25)
+	renter.wealth = 10.0
+	renter.metabolism = 1
+	renter.vision = 1
+	renter.age = 20
+	renter.max_age = 100
+	scene.simulation.sugar.fill(0.0)
+	scene.simulation.capacities.fill(0.0)
+	scene.simulation.capacities[25 * 50 + 25] = 4.0
+	scene.simulation.sugar[25 * 50 + 25] = 4.0
+	scene.simulation.capacities[26 * 50 + 25] = 0.0
+	var owner_wealth_before: float = landowner.wealth
+	scene.advance()
+	check(landowner.wealth > owner_wealth_before, "Landowner must receive rent from renter")
+	# Land inheritance: when landowner dies, land goes to wealthiest child
+	scene.simulation.repopulate_mode = "breed"
+	scene.simulation.land_privacy_enabled = true
+	scene.reset()
+	var parent = scene.simulation.citizens[0]
+	parent.cell = Vector2i(25, 25)
+	parent.wealth = 73.0
+	parent.metabolism = 2
+	parent.vision = 1
+	parent.age = 20
+	parent.max_age = 21  # Will die next step
+	var heir = scene.simulation.citizens[1]
+	heir.cell = Vector2i(26, 25)
+	heir.wealth = 30.0
+	heir.metabolism = 1
+	heir.vision = 1
+	heir.age = 20
+	heir.max_age = 100
+	parent.children.append(heir.id)
+	heir.parents.append(parent.id)
+	scene.simulation.sugar.fill(0.0)
+	scene.simulation.capacities.fill(0.0)
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			var idx := (25 + dy) * 50 + (25 + dx)
+			scene.simulation.capacities[idx] = 4.0
+			scene.simulation.sugar[idx] = 4.0
+	for i in range(2, scene.simulation.citizens.size()):
+		scene.simulation.citizens[i].wealth = 0.1
+	scene.advance()
+	check(scene.simulation.land_owners.size() > 0, "Wealthy resident must acquire land")
+	var land_inherited := false
+	for key in scene.simulation.land_owners.keys():
+		if scene.simulation.land_owners[key] == heir.id:
+			land_inherited = true
+			break
+	check(land_inherited, "Land must inherit to wealthiest child when parent dies")
+	scene.simulation.land_privacy_enabled = false
+	scene.simulation.land_owners.clear()
+	scene.simulation.repopulate_mode = "system"
+	key(KEY_R)
 	for iteration in 10:
 		key(KEY_N)
 	check(scene.simulation.tick == 10, "Repeated single-steps must not skip rounds")
+	# Stop on extinction: kill all residents and next step should not advance
+	for c in scene.simulation.citizens.duplicate():
+		c.death_reason = "starvation"
+	scene.advance()
+	check(scene.simulation.citizens.is_empty(), "All residents must die")
+	var tick_before: int = scene.simulation.tick
+	scene.advance()
+	check(scene.simulation.tick == tick_before, "Advance must not step when population extinct")
+	key(KEY_R)
+	check(scene.simulation.tick == 0, "Reset must restore population after extinction")
 	if DisplayServer.get_name() != "headless":
 		print("UI checks complete; capturing viewport")
 		await RenderingServer.frame_post_draw

@@ -209,6 +209,19 @@ func _test_occupancy_and_shuffle() -> void:
 
 func _test_deaths_and_replacements() -> void:
 	var model = _fixture(3)
+	# Add a distant survivor so the default extinction-stop does not halt replacement
+	var guardian = model.Citizen.new()
+	guardian.id = 999
+	guardian.cell = Vector2i(20, 20)
+	guardian.wealth = 100.0
+	guardian.vision = 1
+	guardian.metabolism = 1
+	guardian.age = 0
+	guardian.max_age = 100
+	guardian.last_harvest = 0.0
+	guardian.death_reason = ""
+	model.citizens.append(guardian)
+	_resource(model, guardian.cell, 100.0, 100.0)
 	var starving = model.citizens[0]
 	var aging = model.citizens[1]
 	var negative = model.citizens[2]
@@ -225,15 +238,16 @@ func _test_deaths_and_replacements() -> void:
 	_check(aging.death_reason == "age" and aging.age == 60, "达到寿命即老死")
 	_check(negative.death_reason == "starvation", "负财富饥饿")
 	_near(negative.wealth, -3.5, "死者保留真实负财富用于预算")
-	_check(model.starved == 2 and model.aged_out == 1 and model.replacements == 80, "累计死亡及补入统计")
+	_check(model.starved == 2 and model.aged_out == 1 and model.replacements == 79, "累计死亡及补入统计")
 	_check(not model.citizens.has(starving) and not model.citizens.has(aging) and not model.citizens.has(negative), "移除所有死者但外部引用可报告原因")
 	_near(model.get_stats().removed_wealth, 16.5, "移除财富包含负数")
 	_near(model.get_stats().released_wealth, 4.0, "寿终居民正财富释放到地块")
-	_near(model.get_stats().consumed, 6.0, "仅旧居民代谢")
+	_near(model.get_stats().consumed, 7.0, "含守护者的代谢")
 	for citizen in model.citizens:
 		_check(citizen.id >= 81, "补入 ID 不重用")
-		_check(citizen.age == 0 and citizen.last_harvest == 0.0, "新人本轮不行动")
-		_check(citizen.wealth >= 5.0 and citizen.wealth <= 25.0, "新人财富范围")
+		if citizen.id != guardian.id:
+			_check(citizen.age == 0 and citizen.last_harvest == 0.0, "新人本轮不行动")
+			_check(citizen.wealth >= 5.0 and citizen.wealth <= 25.0, "新人财富范围")
 	_check_valid(model)
 	for seed_value in 16:
 		model = _fixture(2, seed_value)

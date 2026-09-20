@@ -24,6 +24,7 @@ SugarLand is an AI-powered reimplementation of the classic [Sugarscape](https://
 - **Cellspace**: 50×50 grid with Torus topology, dual-peak resource landscape, seasonal growth rates, and pollution accumulation.
 - **Citizens**: Heterogeneous agents with genetically determined vision (*v* ∈ [1,6]), metabolism (*m* ∈ [1,4]), max age ∈ [60,100], and initial wealth ∈ [5,25].
 - **Ruleset Engine**: Strict G→M→R execution order (Grow → Move → Replace) with randomized agent scheduling to eliminate first-mover bias.
+- **LPC mudlib**: The Go server is a minimal-kernel LPC VM — it only provides state storage, efun primitives, HTTP APIs, and snapshots; all simulation rules (growth, movement, harvest, metabolism, trading, mating, death and replacement) are orchestrated by the LPC script `mudlib/world.lpc`, replaceable at runtime.
 - **Advanced Economics**: Marginal-value-based barter with Bull (high-frequency) and Bear (safety-margin) trading strategies.
 
 ### Project Goal

@@ -1,27 +1,27 @@
 // LPC 示例脚本：贸易行为（Bull 策略）
-// 小量高频交易：当糖过剩时寻找邻居交易
+// 小量高频交易：当糖过剩时标记贸易意愿
 
 void heart_beat() {
     int x = query_x();
     int y = query_y();
-    int wealth = query_wealth();
+    int wealth = query_attr("wealth");
 
     // 先觅食
     int best_x = x;
     int best_y = y;
-    int best_sugar = 0;
-    int s;
+    float best_sugar = 0.0;
+    float s;
 
-    s = query_cell_sugar(x, y - 1);
+    s = query_cell(x, y - 1, "sugar");
     if (s > best_sugar) { best_sugar = s; best_x = x; best_y = y - 1; }
-    s = query_cell_sugar(x, y + 1);
+    s = query_cell(x, y + 1, "sugar");
     if (s > best_sugar) { best_sugar = s; best_x = x; best_y = y + 1; }
-    s = query_cell_sugar(x - 1, y);
+    s = query_cell(x - 1, y, "sugar");
     if (s > best_sugar) { best_sugar = s; best_x = x - 1; best_y = y; }
-    s = query_cell_sugar(x + 1, y);
+    s = query_cell(x + 1, y, "sugar");
     if (s > best_sugar) { best_sugar = s; best_x = x + 1; best_y = y; }
 
-    if (best_sugar == 0) {
+    if (best_sugar == 0.0) {
         int dir = random(4);
         if (dir == 0) {
             move(x, y - 1);
@@ -36,12 +36,13 @@ void heart_beat() {
         move(best_x, best_y);
     }
 
-    harvest();
+    float got = take_cell(query_x(), query_y(), "sugar");
+    set_attr("wealth", query_attr("wealth") + to_int(got));
 
-    // Bull 策略：财富超过阈值时尝试小额交易
+    // Bull 策略：财富超过阈值时标记贸易意愿（意愿的语义由世界脚本定义）
     if (wealth > 20) {
-        set_trade_willingness(1);
+        set_attr("trade_willingness", 1);
     } else {
-        set_trade_willingness(0);
+        set_attr("trade_willingness", 0);
     }
 }

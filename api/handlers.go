@@ -7,16 +7,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/twinsant/sugarland/sim"
+	"github.com/twinsant/sugarland/kernel"
 )
 
 // Handler 封装 API 处理器，持有 World 引用
 type Handler struct {
-	World *sim.World
+	World *kernel.World
 }
 
 // NewHandler 创建新的 API 处理器
-func NewHandler(w *sim.World) *Handler {
+func NewHandler(w *kernel.World) *Handler {
 	return &Handler{World: w}
 }
 
@@ -25,9 +25,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/world", h.handleWorld)
 	mux.HandleFunc("/api/world/step", h.handleWorldStep)
 	mux.HandleFunc("/api/world/reset", h.handleWorldReset)
+	mux.HandleFunc("/api/world/agent", h.handleWorldAgent)
+	mux.HandleFunc("/api/world/agent/detach", h.handleWorldAgentDetach)
+	mux.HandleFunc("/api/snapshot", h.handleSnapshot)
 	mux.HandleFunc("/api/citizens", h.handleCitizens)
+	mux.HandleFunc("/api/citizens/", h.handleCitizens)
 	mux.HandleFunc("/api/cellspace", h.handleCells)
-	mux.HandleFunc("/api/cells/", h.handleCellByCoord)
+	mux.HandleFunc("/api/cells/", h.handleRoomByCoord)
 	mux.HandleFunc("/api/agent/attach", h.handleAgentAttach)
 	mux.HandleFunc("/api/agent/detach", h.handleAgentDetach)
 	mux.HandleFunc("/api/agent/context", h.handleAgentContextGet)
@@ -41,12 +45,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 // writeJSON 写入 JSON 响应
 func writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(data)
 }
 
 // writeError 写入错误响应
 func writeError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
@@ -71,13 +77,79 @@ func (h *Handler) handleWorldStep(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/world/reset - 重置世界
+// 可选请求体 {"config": {...}}：先合并配置再重建世界，
+// 显式传入的键优先于 mudlib declare_defaults 的缺省值
 func (h *Handler) handleWorldReset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	var req struct {
+		Config map[string]interface{} `json:"config"`
+	}
+	// 空 body 容忍：解码失败按无配置处理
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if len(req.Config) > 0 {
+		h.World.ApplyConfig(req.Config)
+	}
 	h.World.Reset()
 	writeJSON(w, h.World.GetState())
+}
+
+// GET /api/snapshot - 聚合世界快照（Godot 等渲染端一次取全）
+func (h *Handler) handleSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, h.World.GetSnapshot())
+}
+
+// WorldAgentRequest 世界级 LPC 脚本请求
+type WorldAgentRequest struct {
+	LPCSource string `json:"lpc_source"`
+}
+
+// /api/world/agent - 世界规则脚本管理
+// GET：返回当前生效的世界 LPC 源码（默认 mudlib 或用户自定义）
+// POST：用自定义 LPC 脚本整体替换世界规则
+func (h *Handler) handleWorldAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		source, custom := h.World.GetWorldScript()
+		writeJSON(w, map[string]interface{}{
+			"object": "world_daemon",
+			"source": source,
+			"custom": custom,
+		})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req WorldAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := h.World.AttachWorldScript(req.LPCSource); err != nil {
+		writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"status": "attached",
+		"object": "world_daemon",
+	})
+}
+
+// POST /api/world/agent/detach - 卸载世界级 LPC 守护脚本
+func (h *Handler) handleWorldAgentDetach(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	h.World.DetachWorldScript()
+	writeJSON(w, map[string]string{"status": "detached"})
 }
 
 // GET /api/citizens - 公民列表
@@ -111,7 +183,7 @@ func (h *Handler) handleCells(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	data, err := h.World.GetCellsJSON()
+	data, err := h.World.GetRoomsJSON()
 	if err != nil {
 		writeError(w, "failed to serialize cells", http.StatusInternalServerError)
 		return
@@ -121,7 +193,7 @@ func (h *Handler) handleCells(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/cells/:x/:y - 单个格子状态
-func (h *Handler) handleCellByCoord(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleRoomByCoord(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -137,7 +209,7 @@ func (h *Handler) handleCellByCoord(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid coordinates", http.StatusBadRequest)
 		return
 	}
-	cell := h.World.GetCell(x, y)
+	cell := h.World.GetRoom(x, y)
 	writeJSON(w, cell)
 }
 
@@ -214,7 +286,13 @@ func (h *Handler) handleAgentContextGet(w http.ResponseWriter, r *http.Request) 
 		writeError(w, "invalid agent id", http.StatusBadRequest)
 		return
 	}
-	ctx, err := h.World.GetAgentContext(id)
+	radius := -1
+	if rs := r.URL.Query().Get("radius"); rs != "" {
+		if rv, err := strconv.Atoi(rs); err == nil {
+			radius = rv
+		}
+	}
+	ctx, err := h.World.GetAgentContext(id, radius)
 	if err != nil {
 		writeError(w, err.Error(), http.StatusNotFound)
 		return
@@ -239,7 +317,13 @@ func (h *Handler) handleAgentContext(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid agent id", http.StatusBadRequest)
 		return
 	}
-	ctx, err := h.World.GetAgentContext(id)
+	radius := -1
+	if rs := r.URL.Query().Get("radius"); rs != "" {
+		if rv, err := strconv.Atoi(rs); err == nil {
+			radius = rv
+		}
+	}
+	ctx, err := h.World.GetAgentContext(id, radius)
 	if err != nil {
 		writeError(w, err.Error(), http.StatusNotFound)
 		return

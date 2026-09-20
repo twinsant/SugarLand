@@ -1,12 +1,12 @@
-// Package sim 实现 Sugarscape 仿真核心模型和规则
-package sim
+// Package kernel 实现 Sugarscape 仿真核心模型和规则
+package kernel
 
 // HeartBeatEntry 注册了 heart beat 的对象
 type HeartBeatEntry struct {
-	ObjectID    string // LPC 对象 ID
-	CitizenID   int    // 对应的公民 ID
-	Interval    int    // 每 N 步调用一次
-	LastCall    int    // 上次调用的步数
+	ObjectID  string // LPC 对象 ID
+	CitizenID int    // 对应的公民 ID
+	Interval  int    // 每 N 步调用一次
+	LastCall  int    // 上次调用的步数
 }
 
 // HeartBeatManager 管理所有 heart beat 回调
@@ -44,6 +44,16 @@ func (h *HeartBeatManager) Unregister(objectID string) {
 // GetEntries 获取所有注册的条目
 func (h *HeartBeatManager) GetEntries() []*HeartBeatEntry {
 	return h.entries
+}
+
+// EntryFor 按对象 ID 查找注册条目
+func (h *HeartBeatManager) EntryFor(objectID string) *HeartBeatEntry {
+	for _, e := range h.entries {
+		if e.ObjectID == objectID {
+			return e
+		}
+	}
+	return nil
 }
 
 // ShouldCall 判断当前步是否应该调用该条目的 heart_beat

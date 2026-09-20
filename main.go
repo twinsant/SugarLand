@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/twinsant/sugarland/api"
-	"github.com/twinsant/sugarland/sim"
+	"github.com/twinsant/sugarland/kernel"
 )
 
 func main() {
@@ -19,18 +19,12 @@ func main() {
 	stepInterval := flag.Duration("interval", 500*time.Millisecond, "自动步进间隔（仅 auto 模式）")
 	flag.Parse()
 
-	config := sim.DefaultConfig()
-	world := sim.NewWorld(config)
+	config := kernel.DefaultConfig()
+	world := kernel.NewWorld(config)
 
-	fmt.Printf("🌍 SugarLand Sugarscape 仿真系统 (Phase 3)\n")
-	fmt.Printf("   网格: %dx%d, 初始人口: %d\n", config.Width, config.Height, config.InitPopulation)
-	fmt.Printf("   双峰糖地形: (%d,%d) 和 (%d,%d), 峰值容量: %.1f\n",
-		config.PeakX1, config.PeakY1, config.PeakX2, config.PeakY2, config.PeakCapacity)
-	fmt.Printf("   环面拓扑: 坐标模运算包裹\n")
-	fmt.Printf("   规则: G(生长) → M(移动) → Trade(贸易) → Mate(繁殖) → R(更替)\n")
-	fmt.Printf("   贸易: %v, 繁殖: %v, 污染: %v\n",
-		config.EnableTrading, config.EnableMating, config.EnablePollution)
-	fmt.Printf("   季节间隔: %d 步\n\n", config.SeasonInterval)
+	fmt.Printf("🌍 SugarLand 最小内核 LPC VM 服务器\n")
+	fmt.Printf("   网格: %dx%d（环面拓扑）, 世界规则: mudlib/world.lpc\n", config.Int("width"), config.Int("height"))
+	fmt.Printf("   内核只管状态存储 / LPC VM / efun 原语 / 快照；全部游戏规则在 mudlib\n\n")
 
 	if *autoStep {
 		go func() {
@@ -40,9 +34,8 @@ func main() {
 				world.Step()
 				state := world.GetState()
 				sb := world.Scoreboard
-				fmt.Printf("[T=%d] 人口=%d, 总糖=%.1f, 基尼=%.3f, Bull=%d, Bear=%d\n",
-					state.Timestep, state.Population, state.TotalSugar,
-					sb.GiniCoefficient, sb.BullCount, sb.BearCount)
+				fmt.Printf("[T=%d] 人口=%d, 出生=%v, 死亡=%v\n",
+					state.Timestep, state.Population, sb["birth_count"], sb["death_count"])
 			}
 		}()
 	}
@@ -64,5 +57,40 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", *port)
 	fmt.Printf("🚀 HTTP 服务启动: http://localhost%s\n", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.ListenAndServe(addr, logMiddleware(corsMiddleware(mux))))
+}
+
+// statusWriter 捕获响应状态码供日志使用
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// logMiddleware 记录每个 HTTP 请求的方法/路径/状态码/耗时
+func logMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		lw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(lw, r)
+		log.Printf("%s %s %d %s", r.Method, r.URL.Path, lw.status, time.Since(start).Round(time.Microsecond))
+	})
+}
+
+// corsMiddleware 允许跨域访问（Godot Web 导出端可用）
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

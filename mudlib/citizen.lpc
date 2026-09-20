@@ -1,0 +1,94 @@
+// citizen.lpc — 默认居民蓝图（mudlib）
+// spawn_citizen 生成实体时自动绑定本对象：每个居民天生是 LPC object。
+// heart_beat 由世界脚本通过 call_citizen(id, "heart_beat") 驱动；
+// 用户挂接脚本等价于替换本对象的程序，卸载则恢复本蓝图。
+//
+// 职责与本地 _choose_cell 一致：只决定去向并移动；
+// 采集/租金/代谢/移动消耗/衰老/购地由世界脚本统一结算。
+//
+// 默认可用 efun（绑定到自身）：query_x/query_y、query_attr/set_attr、
+// query_cell_here/query_cell、query_contents（占位判定）、query_env、
+// grid_width/grid_height、query_config、move、walk、take_cell、random、
+// write、to_int/to_float、member 等
+
+int wrap(int v, int m) {
+    int r = v % m;
+    if (r < 0) { r = r + m; }
+    return r;
+}
+
+// 指定格是否无人占据（一格一人）
+int cell_empty(int x, int y) {
+    return sizeof(query_contents(x, y)) == 0;
+}
+
+void heart_beat() {
+    int W = grid_width();
+    int H = grid_height();
+    int x = query_x();
+    int y = query_y();
+    int vision = query_attr("vision");
+    float wealth = to_float(query_attr("wealth"));
+    int metabolism = query_attr("metabolism");
+    // 4 条正交视线方向（与本地 DIRECTIONS 一致：左、右、上、下）
+    int dxs = ({-1, 1, 0, 0});
+    int dys = ({0, 0, -1, 1});
+    int px = x;
+    int py = y;
+
+    if (wealth >= to_float(metabolism) * 25.0) {
+        // 富裕闲逛：视线内未占格 + 原地，随机选一（去重，环面回绕可能重复）
+        int cand = ({y * W + x});
+        for (int d = 0; d < 4; d++) {
+            for (int dist = 1; dist <= vision; dist++) {
+                int nx = wrap(x + dxs[d] * dist, W);
+                int ny = wrap(y + dys[d] * dist, H);
+                int idx = ny * W + nx;
+                if (!cell_empty(nx, ny)) { continue; }
+                if (member(idx, cand) >= 0) { continue; }
+                cand = push(cand, idx);
+            }
+        }
+        int pick = cand[random(sizeof(cand))];
+        px = pick % W;
+        py = pick / W;
+        if (px == x && py == y) {
+            set_attr("last_action", "stay");
+        } else {
+            set_attr("last_action", "wander");
+        }
+    } else {
+        // 追糖：沿 4 条视线找未占格中糖最多者；
+        // 平局取最近，再平局随机——与本地 _choose_cell 一致
+        int cand = ({y * W + x});
+        float best = query_cell_here("sugar");
+        int best_dist = 0;
+        for (int d = 0; d < 4; d++) {
+            for (int dist = 1; dist <= vision; dist++) {
+                int nx = wrap(x + dxs[d] * dist, W);
+                int ny = wrap(y + dys[d] * dist, H);
+                if (!cell_empty(nx, ny)) { continue; }
+                float s = query_cell(nx, ny, "sugar");
+                if (s > best || (s == best && dist < best_dist)) {
+                    cand = ({ny * W + nx});
+                    best = s;
+                    best_dist = dist;
+                } else if (s == best && dist == best_dist) {
+                    if (member(ny * W + nx, cand) < 0) {
+                        cand = push(cand, ny * W + nx);
+                    }
+                }
+            }
+        }
+        int pick = cand[random(sizeof(cand))];
+        px = pick % W;
+        py = pick / W;
+        if (px == x && py == y) {
+            set_attr("last_action", "stay");
+        } else {
+            set_attr("last_action", "seek");
+        }
+    }
+
+    move(px, py);
+}

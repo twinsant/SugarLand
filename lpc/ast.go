@@ -14,16 +14,20 @@ const (
 	NodeForStmt      NodeType = "ForStmt"
 	NodeWhileStmt    NodeType = "WhileStmt"
 	NodeReturnStmt   NodeType = "ReturnStmt"
+	NodeBreakStmt    NodeType = "BreakStmt"
+	NodeContinueStmt NodeType = "ContinueStmt"
 	NodeBlockStmt    NodeType = "BlockStmt"
 
-	NodeBinaryExpr  NodeType = "BinaryExpr"
-	NodeUnaryExpr   NodeType = "UnaryExpr"
-	NodeCallExpr    NodeType = "CallExpr"
-	NodeMemberExpr  NodeType = "MemberExpr"
-	NodeIndexExpr   NodeType = "IndexExpr"
-	NodeIntLiteral  NodeType = "IntLiteral"
+	NodeBinaryExpr    NodeType = "BinaryExpr"
+	NodeUnaryExpr     NodeType = "UnaryExpr"
+	NodeCallExpr      NodeType = "CallExpr"
+	NodeMemberExpr    NodeType = "MemberExpr"
+	NodeIndexExpr     NodeType = "IndexExpr"
+	NodeIntLiteral    NodeType = "IntLiteral"
+	NodeFloatLiteral  NodeType = "FloatLiteral"
+	NodeArrayLiteral  NodeType = "ArrayLiteral"
 	NodeStringLiteral NodeType = "StringLiteral"
-	NodeIdentExpr   NodeType = "IdentExpr"
+	NodeIdentExpr     NodeType = "IdentExpr"
 )
 
 // Node 是 AST 节点的接口
@@ -126,6 +130,16 @@ type ReturnStmt struct {
 
 func (r *ReturnStmt) nodeType() NodeType { return NodeReturnStmt }
 
+// BreakStmt 表示 break 语句
+type BreakStmt struct{}
+
+func (b *BreakStmt) nodeType() NodeType { return NodeBreakStmt }
+
+// ContinueStmt 表示 continue 语句
+type ContinueStmt struct{}
+
+func (c *ContinueStmt) nodeType() NodeType { return NodeContinueStmt }
+
 // --- 表达式 ---
 
 // BinaryExpr 表示二元表达式
@@ -176,6 +190,20 @@ type IntLiteral struct {
 }
 
 func (i *IntLiteral) nodeType() NodeType { return NodeIntLiteral }
+
+// FloatLiteral 表示浮点字面量
+type FloatLiteral struct {
+	Value float64
+}
+
+func (f *FloatLiteral) nodeType() NodeType { return NodeFloatLiteral }
+
+// ArrayLiteral 表示数组字面量 ({...})
+type ArrayLiteral struct {
+	Elements []Node
+}
+
+func (a *ArrayLiteral) nodeType() NodeType { return NodeArrayLiteral }
 
 // StringLiteral 表示字符串字面量
 type StringLiteral struct {

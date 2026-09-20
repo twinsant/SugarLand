@@ -1,0 +1,15 @@
+// cell.lpc — 默认格子蓝图（room 等价物）
+// 每个格子天生绑定本对象；世界脚本可用 bind_cell(x,y,src) 给特定格子
+// 换蓝图（区域差异行为），用 call_cell(x,y,method) 驱动格子对象。
+//
+// 默认可用 efun（绑定到本格）：query_x/query_y、query_timestep、
+// query_cell_here/set_cell_here/take_cell_here（本格属性按名存取）、
+// query_cell(x,y,name)（任意格）、random、write、to_int/to_float、sprintf 等
+
+void create() {
+}
+
+// short() - 格子的短描述（room 风格，供世界脚本/调试使用）
+string short() {
+    return sprintf("cell(%d,%d)", query_x(), query_y());
+}

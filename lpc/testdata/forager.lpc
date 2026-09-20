@@ -6,11 +6,11 @@ void heart_beat() {
     int y = query_y();
     int best_x = x;
     int best_y = y;
-    int best_sugar = 0;
-    int s;
+    float best_sugar = 0.0;
+    float s;
 
     // 检查北
-    s = query_cell_sugar(x, y - 1);
+    s = query_cell(x, y - 1, "sugar");
     if (s > best_sugar) {
         best_sugar = s;
         best_x = x;
@@ -18,7 +18,7 @@ void heart_beat() {
     }
 
     // 检查南
-    s = query_cell_sugar(x, y + 1);
+    s = query_cell(x, y + 1, "sugar");
     if (s > best_sugar) {
         best_sugar = s;
         best_x = x;
@@ -26,7 +26,7 @@ void heart_beat() {
     }
 
     // 检查西
-    s = query_cell_sugar(x - 1, y);
+    s = query_cell(x - 1, y, "sugar");
     if (s > best_sugar) {
         best_sugar = s;
         best_x = x - 1;
@@ -34,7 +34,7 @@ void heart_beat() {
     }
 
     // 检查东
-    s = query_cell_sugar(x + 1, y);
+    s = query_cell(x + 1, y, "sugar");
     if (s > best_sugar) {
         best_sugar = s;
         best_x = x + 1;
@@ -42,7 +42,7 @@ void heart_beat() {
     }
 
     // 如果四方向都没有更多糖，随机移动
-    if (best_sugar == 0) {
+    if (best_sugar == 0.0) {
         int dir = random(4);
         if (dir == 0) {
             move(x, y - 1);
@@ -57,5 +57,7 @@ void heart_beat() {
         move(best_x, best_y);
     }
 
-    harvest();
+    // 取走本格全部糖并计入财富
+    float got = take_cell(query_x(), query_y(), "sugar");
+    set_attr("wealth", query_attr("wealth") + to_int(got));
 }

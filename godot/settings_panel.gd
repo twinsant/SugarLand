@@ -5,6 +5,7 @@ signal closed
 var world
 
 var _panel: PanelContainer
+var _hint: Label
 var _growth_rate: SpinBox
 var _peak_a_x: SpinBox
 var _peak_a_y: SpinBox
@@ -17,6 +18,8 @@ var _repopulate_mode: OptionButton
 var _breed_age_min: SpinBox
 var _breed_age_max: SpinBox
 var _move_cost: SpinBox
+var _land_privacy: CheckButton
+var _rent_rate: SpinBox
 
 
 func _ready() -> void:
@@ -64,7 +67,9 @@ func _build_ui() -> void:
 	hint.add_theme_font_size_override("font_size", 13)
 	hint.add_theme_color_override("font_color", Color("9bb9bd"))
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(hint)
+	_hint = hint
 	_growth_rate = _add_row(vbox, "糖再生速率", 0.0, 3.0, 0.1)
 	_peak_capacity = _add_row(vbox, "双峰容量", 1.0, 8.0, 0.1)
 	_peak_falloff = _add_row(vbox, "容量衰减", 0.05, 0.5, 0.01)
@@ -77,6 +82,8 @@ func _build_ui() -> void:
 	_breed_age_min = _add_row(vbox, "繁殖年龄下限", 0, 100, 1)
 	_breed_age_max = _add_row(vbox, "繁殖年龄上限", 0, 100, 1)
 	_move_cost = _add_row(vbox, "移动消耗系数", 0.0, 2.0, 0.1)
+	_land_privacy = _add_check_row(vbox, "土地私有")
+	_rent_rate = _add_row(vbox, "租金比例", 0.0, 1.0, 0.05)
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 12)
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -135,6 +142,21 @@ func _add_option_row(parent: Control, text: String, labels: Array, values: Array
 	return option
 
 
+func _add_check_row(parent: Control, text: String) -> CheckButton:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	parent.add_child(row)
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", 15)
+	label.add_theme_color_override("font_color", Color("cfe6e8"))
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(label)
+	var check := CheckButton.new()
+	row.add_child(check)
+	return check
+
+
 func _load_values() -> void:
 	var sim = world.simulation
 	_growth_rate.value = sim.growth_rate
@@ -148,14 +170,38 @@ func _load_values() -> void:
 	_breed_age_min.value = sim.breed_age_min
 	_breed_age_max.value = sim.breed_age_max
 	_move_cost.value = sim.move_cost
+	_land_privacy.button_pressed = sim.land_privacy_enabled
+	_rent_rate.value = sim.rent_rate
 	for index in _repopulate_mode.item_count:
 		if _repopulate_mode.get_item_metadata(index) == sim.repopulate_mode:
 			_repopulate_mode.select(index)
 			break
+	if sim.is_remote:
+		_hint.text = "远程模式：参数将写入服务端世界配置；应用即重置服务端世界"
 
 
 func _apply() -> void:
 	var sim = world.simulation
+	if sim.is_remote:
+		sim.pending_config = {
+			"growth_rate": _growth_rate.value,
+			"peak_x1": int(_peak_a_x.value),
+			"peak_y1": int(_peak_a_y.value),
+			"peak_x2": int(_peak_b_x.value),
+			"peak_y2": int(_peak_b_y.value),
+			"peak_capacity": _peak_capacity.value,
+			"peak_falloff": _peak_falloff.value,
+			"repopulate_mode": _repopulate_mode.get_selected_metadata(),
+			"breed_age_min": int(_breed_age_min.value),
+			"breed_age_max": int(_breed_age_max.value),
+			"move_cost": _move_cost.value,
+			"land_privacy_enabled": 1 if _land_privacy.button_pressed else 0,
+			"rent_rate": _rent_rate.value,
+		}
+		world.step_seconds = _step_seconds.value
+		world.apply_settings()
+		_close()
+		return
 	sim.growth_rate = _growth_rate.value
 	sim.peak_a = Vector2i(int(_peak_a_x.value), int(_peak_a_y.value))
 	sim.peak_b = Vector2i(int(_peak_b_x.value), int(_peak_b_y.value))
@@ -165,6 +211,8 @@ func _apply() -> void:
 	sim.breed_age_min = int(_breed_age_min.value)
 	sim.breed_age_max = int(_breed_age_max.value)
 	sim.move_cost = _move_cost.value
+	sim.land_privacy_enabled = _land_privacy.button_pressed
+	sim.rent_rate = _rent_rate.value
 	world.step_seconds = _step_seconds.value
 	world.apply_settings()
 	_close()

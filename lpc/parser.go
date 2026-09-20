@@ -1,6 +1,9 @@
 package lpc
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Parser 语法分析器，将 Token 序列构建为 AST
 type Parser struct {
@@ -44,7 +47,7 @@ func (p *Parser) Errors() []string {
 
 // isType 判断 Token 是否为类型关键字
 func (p *Parser) isType(t TokenType) bool {
-	return t == TokenIntType || t == TokenStringType || t == TokenVoid || t == TokenObject
+	return t == TokenIntType || t == TokenFloatType || t == TokenStringType || t == TokenVoid || t == TokenObject
 }
 
 // isIdent 判断 Token 是否为标识符
@@ -194,9 +197,17 @@ func (p *Parser) parseStatement() Node {
 		return p.parseWhile()
 	case TokenReturn:
 		return p.parseReturn()
+	case TokenBreak:
+		p.advance()
+		p.expect(TokenSemicolon)
+		return &BreakStmt{}
+	case TokenContinue:
+		p.advance()
+		p.expect(TokenSemicolon)
+		return &ContinueStmt{}
 	case TokenLBrace:
 		return p.parseBlock()
-	case TokenIntType, TokenStringType, TokenVoid, TokenObject:
+	case TokenIntType, TokenFloatType, TokenStringType, TokenVoid, TokenObject:
 		if p.peek.Type == TokenIdent {
 			return p.parseVarDecl()
 		}
@@ -495,8 +506,14 @@ func (p *Parser) parsePrimary() Node {
 		p.advance()
 		return &IntLiteral{Value: val}
 
+	case TokenFloat:
+		val := 0.0
+		fmt.Sscanf(p.cur.Literal, "%f", &val)
+		p.advance()
+		return &FloatLiteral{Value: val}
+
 	case TokenString:
-		val := p.cur.Literal
+		val := unescapeString(p.cur.Literal)
 		p.advance()
 		return &StringLiteral{Value: val}
 
@@ -511,6 +528,20 @@ func (p *Parser) parsePrimary() Node {
 
 	case TokenLParen:
 		p.advance()
+		// LPC 数组字面量 ({...})
+		if p.cur.Type == TokenLBrace {
+			p.advance()
+			var elems []Node
+			for p.cur.Type != TokenRBrace && p.cur.Type != TokenEOF {
+				elems = append(elems, p.parseExpression())
+				if p.cur.Type == TokenComma {
+					p.advance()
+				}
+			}
+			p.expect(TokenRBrace)
+			p.expect(TokenRParen)
+			return &ArrayLiteral{Elements: elems}
+		}
 		expr := p.parseExpression()
 		p.expect(TokenRParen)
 		return expr
@@ -521,4 +552,32 @@ func (p *Parser) parsePrimary() Node {
 		p.advance()
 		return &IntLiteral{Value: 0}
 	}
+}
+
+// unescapeString 处理字符串字面量中的转义序列
+// lexer 原样保留反斜杠，这里转换为实际字符
+func unescapeString(s string) string {
+	if !strings.Contains(s, "\\") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+			switch s[i] {
+			case 'n':
+				b.WriteByte('\n')
+			case 't':
+				b.WriteByte('\t')
+			case 'r':
+				b.WriteByte('\r')
+			default:
+				b.WriteByte(s[i])
+			}
+		} else {
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }

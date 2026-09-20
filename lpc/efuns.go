@@ -118,17 +118,17 @@ func (vm *VM) RegisterDefaultEfuns() {
 		}
 		fmtStr := args[0].String()
 		result := fmtStr
-		// 简单实现：替换 %d 和 %s
+		// 简单实现：替换 %d、%s、%f
 		argIdx := 1
 		for i := 0; i < len(result) && argIdx < len(args); i++ {
 			if result[i] == '%' && i+1 < len(result) {
 				switch result[i+1] {
-				case 'd':
+				case 'd', 's':
 					result = result[:i] + args[argIdx].String() + result[i+2:]
 					argIdx++
 					i--
-				case 's':
-					result = result[:i] + args[argIdx].String() + result[i+2:]
+				case 'f':
+					result = result[:i] + fmt.Sprintf("%g", args[argIdx].ToFloat()) + result[i+2:]
 					argIdx++
 					i--
 				}
@@ -154,7 +154,7 @@ func (vm *VM) RegisterDefaultEfuns() {
 		return args[0]
 	})
 
-	// sort_array(mixed* arr, function f) - 排序
+	// sort_array(mixed* arr, function f) - 排序（数值按大小，字符串按字典序）
 	vm.RegisterEfun("sort_array", func(args []Value) Value {
 		if len(args) < 1 || args[0].Kind != "array" {
 			return ArrayValue([]Value{})
@@ -162,7 +162,10 @@ func (vm *VM) RegisterDefaultEfuns() {
 		arr := make([]Value, len(args[0].ArrVal))
 		copy(arr, args[0].ArrVal)
 		sort.Slice(arr, func(i, j int) bool {
-			return arr[i].IntVal < arr[j].IntVal
+			if arr[i].Kind == "string" || arr[j].Kind == "string" {
+				return arr[i].String() < arr[j].String()
+			}
+			return arr[i].ToFloat() < arr[j].ToFloat()
 		})
 		return ArrayValue(arr)
 	})
@@ -235,10 +238,16 @@ func (vm *VM) RegisterDefaultEfuns() {
 		return args[0].ArrVal[0]
 	})
 
-	// abs(int n) - 绝对值
+	// abs(number n) - 绝对值
 	vm.RegisterEfun("abs", func(args []Value) Value {
 		if len(args) < 1 {
 			return IntValue(0)
+		}
+		if args[0].Kind == "float" {
+			if args[0].FloatVal < 0 {
+				return FloatValue(-args[0].FloatVal)
+			}
+			return args[0]
 		}
 		if args[0].IntVal < 0 {
 			return IntValue(-args[0].IntVal)
@@ -246,10 +255,16 @@ func (vm *VM) RegisterDefaultEfuns() {
 		return IntValue(args[0].IntVal)
 	})
 
-	// max(int a, int b) - 最大值
+	// max(number a, number b) - 最大值
 	vm.RegisterEfun("max", func(args []Value) Value {
 		if len(args) < 2 {
 			return IntValue(0)
+		}
+		if args[0].Kind == "float" || args[1].Kind == "float" {
+			if args[0].ToFloat() > args[1].ToFloat() {
+				return args[0]
+			}
+			return args[1]
 		}
 		if args[0].IntVal > args[1].IntVal {
 			return args[0]
@@ -257,14 +272,47 @@ func (vm *VM) RegisterDefaultEfuns() {
 		return args[1]
 	})
 
-	// min(int a, int b) - 最小值
+	// min(number a, number b) - 最小值
 	vm.RegisterEfun("min", func(args []Value) Value {
 		if len(args) < 2 {
 			return IntValue(0)
+		}
+		if args[0].Kind == "float" || args[1].Kind == "float" {
+			if args[0].ToFloat() < args[1].ToFloat() {
+				return args[0]
+			}
+			return args[1]
 		}
 		if args[0].IntVal < args[1].IntVal {
 			return args[0]
 		}
 		return args[1]
+	})
+
+	// push(mixed* arr, mixed v) - 追加元素，返回新数组
+	vm.RegisterEfun("push", func(args []Value) Value {
+		if len(args) < 2 || args[0].Kind != "array" {
+			return ArrayValue([]Value{})
+		}
+		arr := make([]Value, len(args[0].ArrVal)+1)
+		copy(arr, args[0].ArrVal)
+		arr[len(args[0].ArrVal)] = args[1]
+		return ArrayValue(arr)
+	})
+
+	// to_int(mixed v) - 转换为整数（浮点截断）
+	vm.RegisterEfun("to_int", func(args []Value) Value {
+		if len(args) < 1 {
+			return IntValue(0)
+		}
+		return IntValue(args[0].ToInt())
+	})
+
+	// to_float(mixed v) - 转换为浮点数
+	vm.RegisterEfun("to_float", func(args []Value) Value {
+		if len(args) < 1 {
+			return FloatValue(0)
+		}
+		return FloatValue(args[0].ToFloat())
 	})
 }

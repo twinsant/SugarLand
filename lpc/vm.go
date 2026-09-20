@@ -67,15 +67,37 @@ func (e *Environment) SetGlobal(name string, val Value) {
 
 // Value 表示 LPC 运行时值
 type Value struct {
-	Kind   string // "int", "string", "array", "null"
-	IntVal int
-	StrVal string
-	ArrVal []Value
+	Kind     string // "int", "float", "string", "array", "null"
+	IntVal   int
+	FloatVal float64
+	StrVal   string
+	ArrVal   []Value
 }
 
 // IntValue 创建整数值
 func IntValue(v int) Value {
 	return Value{Kind: "int", IntVal: v}
+}
+
+// FloatValue 创建浮点值
+func FloatValue(v float64) Value {
+	return Value{Kind: "float", FloatVal: v}
+}
+
+// ToFloat 将数值转换为 float64
+func (v Value) ToFloat() float64 {
+	if v.Kind == "float" {
+		return v.FloatVal
+	}
+	return float64(v.IntVal)
+}
+
+// ToInt 将数值转换为 int（浮点截断）
+func (v Value) ToInt() int {
+	if v.Kind == "float" {
+		return int(v.FloatVal)
+	}
+	return v.IntVal
 }
 
 // ArrayValue 创建数组值
@@ -98,6 +120,8 @@ func (v Value) IsTrue() bool {
 	switch v.Kind {
 	case "int":
 		return v.IntVal != 0
+	case "float":
+		return v.FloatVal != 0
 	case "string":
 		return v.StrVal != ""
 	default:
@@ -110,6 +134,8 @@ func (v Value) String() string {
 	switch v.Kind {
 	case "int":
 		return fmt.Sprintf("%d", v.IntVal)
+	case "float":
+		return fmt.Sprintf("%g", v.FloatVal)
 	case "string":
 		return v.StrVal
 	case "array":
@@ -126,6 +152,20 @@ type ReturnValue struct {
 
 func (r *ReturnValue) Error() string {
 	return "return"
+}
+
+// BreakSignal 表示 break 语句（用于控制流）
+type BreakSignal struct{}
+
+func (b *BreakSignal) Error() string {
+	return "break"
+}
+
+// ContinueSignal 表示 continue 语句（用于控制流）
+type ContinueSignal struct{}
+
+func (c *ContinueSignal) Error() string {
+	return "continue"
 }
 
 const (
@@ -347,10 +387,16 @@ func (vm *VM) execStmt(stmt Node) error {
 				}
 			}
 			if err := vm.execBlock(s.Body); err != nil {
-				if _, ok := err.(*ReturnValue); ok {
+				switch err.(type) {
+				case *ReturnValue:
+					return err
+				case *BreakSignal:
+					return nil
+				case *ContinueSignal:
+					// 继续执行 post 表达式
+				default:
 					return err
 				}
-				return err
 			}
 			if s.Post != nil {
 				if err := vm.execStmt(s.Post); err != nil {
@@ -366,12 +412,24 @@ func (vm *VM) execStmt(stmt Node) error {
 				break
 			}
 			if err := vm.execBlock(s.Body); err != nil {
-				if _, ok := err.(*ReturnValue); ok {
+				switch err.(type) {
+				case *ReturnValue:
+					return err
+				case *BreakSignal:
+					return nil
+				case *ContinueSignal:
+					continue
+				default:
 					return err
 				}
-				return err
 			}
 		}
+
+	case *BreakStmt:
+		return &BreakSignal{}
+
+	case *ContinueStmt:
+		return &ContinueSignal{}
 
 	case *ReturnStmt:
 		var val Value
@@ -396,6 +454,30 @@ func (vm *VM) evalExpr(expr Node) Value {
 	case *IntLiteral:
 		return IntValue(e.Value)
 
+	case *FloatLiteral:
+		return FloatValue(e.Value)
+
+	case *ArrayLiteral:
+		elems := make([]Value, len(e.Elements))
+		for i, el := range e.Elements {
+			elems[i] = vm.evalExpr(el)
+		}
+		return ArrayValue(elems)
+
+	case *IndexExpr:
+		obj := vm.evalExpr(e.Object)
+		idx := vm.evalExpr(e.Index)
+		if obj.Kind != "array" {
+			vm.abortErr = fmt.Errorf("index into non-array value %s", obj.Kind)
+			return Null()
+		}
+		i := idx.ToInt()
+		if i < 0 || i >= len(obj.ArrVal) {
+			vm.abortErr = fmt.Errorf("array index %d out of range (len=%d)", i, len(obj.ArrVal))
+			return Null()
+		}
+		return obj.ArrVal[i]
+
 	case *StringLiteral:
 		return StringValue(e.Value)
 
@@ -419,6 +501,9 @@ func (vm *VM) evalExpr(expr Node) Value {
 			return IntValue(1)
 		}
 		if e.Op == "-" {
+			if val.Kind == "float" {
+				return FloatValue(-val.FloatVal)
+			}
 			return IntValue(-val.IntVal)
 		}
 		return val
@@ -456,11 +541,16 @@ func (vm *VM) evalExpr(expr Node) Value {
 
 // evalBinary 求值二元运算
 func (vm *VM) evalBinary(op string, left, right Value) Value {
+	// 字符串拼接优先（"x" + 1.5 → "x1.5"）
+	if op == "+" && (left.Kind == "string" || right.Kind == "string") {
+		return StringValue(left.String() + right.String())
+	}
+	// 任一侧为 float 时按浮点运算
+	if left.Kind == "float" || right.Kind == "float" {
+		return vm.evalFloatBinary(op, left.ToFloat(), right.ToFloat())
+	}
 	switch op {
 	case "+":
-		if left.Kind == "string" || right.Kind == "string" {
-			return StringValue(left.String() + right.String())
-		}
 		return IntValue(left.IntVal + right.IntVal)
 	case "-":
 		return IntValue(left.IntVal - right.IntVal)
@@ -514,6 +604,45 @@ func (vm *VM) evalBinary(op string, left, right Value) Value {
 		return IntValue(left.IntVal + 1)
 	case "--":
 		return IntValue(left.IntVal - 1)
+	}
+	return Null()
+}
+
+// evalFloatBinary 求值浮点二元运算（比较返回 int 0/1）
+func (vm *VM) evalFloatBinary(op string, l, r float64) Value {
+	switch op {
+	case "+":
+		return FloatValue(l + r)
+	case "-":
+		return FloatValue(l - r)
+	case "*":
+		return FloatValue(l * r)
+	case "/":
+		if r == 0 {
+			return Null()
+		}
+		return FloatValue(l / r)
+	case "%":
+		if r == 0 {
+			return Null()
+		}
+		return FloatValue(float64(int(l) % int(r)))
+	case "==":
+		return boolVal(l == r)
+	case "!=":
+		return boolVal(l != r)
+	case "<":
+		return boolVal(l < r)
+	case ">":
+		return boolVal(l > r)
+	case "<=":
+		return boolVal(l <= r)
+	case ">=":
+		return boolVal(l >= r)
+	case "&&":
+		return boolVal(l != 0 && r != 0)
+	case "||":
+		return boolVal(l != 0 || r != 0)
 	}
 	return Null()
 }
