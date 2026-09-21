@@ -22,10 +22,13 @@ uniform vec2 center_uv = vec2(0.5);
 uniform float radius_uv = 0.08;
 uniform float feather_uv = 0.02;
 uniform float density = 0.92;
+uniform float pulse_radius_strength = 0.20;
 
 void fragment() {
     float distance_from_center = distance(UV, center_uv);
-    float alpha = smoothstep(radius_uv, radius_uv + feather_uv, distance_from_center) * density;
+    float breath = pow(0.5 + 0.5 * sin(TIME * 1.8), 1.8);
+    float illuminated_radius = radius_uv * (1.0 - pulse_radius_strength + pulse_radius_strength * breath);
+    float alpha = smoothstep(illuminated_radius, illuminated_radius + feather_uv, distance_from_center) * density;
     COLOR = vec4(0.01, 0.02, 0.03, alpha);
 }
 """

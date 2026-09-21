@@ -1,6 +1,9 @@
 extends Node2D
 
 const ThoughtBubble = preload("res://thought_bubble.gd")
+const RING_SHADER = preload("res://vision_ring.gdshader")
+const RING_POS := 0.82
+const RING_PIXELS := 64
 
 const GENERATION_COLORS := [
 	Color("e67e22"), Color("f1c40f"), Color("2ecc71"),
@@ -23,6 +26,15 @@ var travel := 1.0
 var pending_harvest := 0.0
 var thought_text := ""
 var bubble: ThoughtBubble
+var vision_ring: Sprite2D
+
+static var ring_texture: ImageTexture
+
+
+static func _build_ring_texture() -> ImageTexture:
+	var img := Image.create(RING_PIXELS, RING_PIXELS, false, Image.FORMAT_RGBA8)
+	img.fill(Color.WHITE)
+	return ImageTexture.create_from_image(img)
 var tutorial_bubble := false
 var tutorial_show_vision := false
 var map_bounds: Rect2
@@ -32,6 +44,18 @@ func _ready() -> void:
 	bubble = ThoughtBubble.new()
 	bubble.name = "ThoughtBubbleRoot"
 	add_child(bubble)
+	if ring_texture == null:
+		ring_texture = _build_ring_texture()
+	vision_ring = Sprite2D.new()
+	vision_ring.name = "VisionRing"
+	vision_ring.texture = ring_texture
+	var mat := ShaderMaterial.new()
+	mat.shader = RING_SHADER
+	vision_ring.material = mat
+	vision_ring.show_behind_parent = true
+	vision_ring.visible = false
+	add_child(vision_ring)
+
 
 
 func set_bubble_viewport(rect: Rect2) -> void:
@@ -106,10 +130,11 @@ func _process(delta: float) -> void:
 
 func _draw() -> void:
 	var stride := sin(travel * TAU * 2.0) * 1.8 if travel < 1.0 else 0.0
-	if selected or tutorial_show_vision:
-		var radius := (vision + 0.5) * tile_size
-		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, Color(0.27, 0.78, 0.91, 0.55), 1.4, true)
-		draw_arc(Vector2.ZERO, radius, 0.0, TAU, 48, Color(0.45, 0.88, 1.0, 0.12), 0.8, true)
+	if vision_ring != null:
+		vision_ring.visible = selected or tutorial_show_vision
+		if vision_ring.visible:
+			var radius := (vision + 0.5) * tile_size
+			vision_ring.scale = Vector2.ONE * (radius / RING_POS * 2.0 / RING_PIXELS)
 	draw_set_transform(Vector2(0, 3), 0.0, Vector2(1.0, 0.4))
 	draw_circle(Vector2.ZERO, 5.0, Color(0, 0, 0, 0.3))
 	draw_set_transform(Vector2.ZERO)
